@@ -4,8 +4,10 @@ use crate::types::{FromSqlError, FromSqlResult};
 use crate::Row;
 use rust_decimal::prelude::*;
 
-use arrow::array::{Array, ArrayRef, DictionaryArray, LargeListArray, ListArray};
-use arrow::datatypes::{UInt16Type, UInt32Type, UInt8Type};
+use arrow::{
+    array::{Array, ArrayRef, DictionaryArray, LargeListArray, ListArray},
+    datatypes::{UInt16Type, UInt32Type, UInt8Type},
+};
 
 /// An absolute length of time in seconds, milliseconds, microseconds or nanoseconds.
 /// Copy from arrow::datatypes::TimeUnit
@@ -19,6 +21,18 @@ pub enum TimeUnit {
     Microsecond,
     /// Time in nanoseconds.
     Nanosecond,
+}
+
+impl TimeUnit {
+    /// Convert a number of `TimeUnit` to microseconds.
+    pub fn to_micros(&self, value: i64) -> i64 {
+        match self {
+            TimeUnit::Second => value * 1_000_000,
+            TimeUnit::Millisecond => value * 1000,
+            TimeUnit::Microsecond => value,
+            TimeUnit::Nanosecond => value / 1000,
+        }
+    }
 }
 
 /// A non-owning [static type value](https://duckdb.org/docs/sql/data_types/overview). Typically the

@@ -1,5 +1,5 @@
 use super::{
-    vector::{FlatVector, ListVector, Vector},
+    vector::{ArrayVector, FlatVector, ListVector, Vector},
     BindInfo, DataChunk, Free, FunctionInfo, InitInfo, LogicalType, LogicalTypeId, StructVector, VTab,
 };
 use std::ptr::null_mut;
@@ -17,7 +17,7 @@ use arrow::{
     record_batch::RecordBatch,
 };
 
-use num::cast::AsPrimitive;
+use num::{cast::AsPrimitive, ToPrimitive};
 
 /// A pointer to the Arrow record batch for the table function.
 #[repr(C)]
@@ -165,7 +165,7 @@ pub fn to_duckdb_type_id(data_type: &DataType) -> Result<LogicalTypeId, Box<dyn 
         // duckdb/src/main/capi/helper-c.cpp does not support decimal
         // DataType::Decimal128(_, _) => Decimal,
         // DataType::Decimal256(_, _) => Decimal,
-        DataType::Decimal128(_, _) => Double,
+        DataType::Decimal128(_, _) => Decimal,
         DataType::Decimal256(_, _) => Double,
         DataType::Map(_, _) => Map,
         _ => {
@@ -177,32 +177,34 @@ pub fn to_duckdb_type_id(data_type: &DataType) -> Result<LogicalTypeId, Box<dyn 
 
 /// Convert arrow DataType to duckdb logical type
 pub fn to_duckdb_logical_type(data_type: &DataType) -> Result<LogicalType, Box<dyn std::error::Error>> {
-    if data_type.is_primitive()
-        || matches!(
-            data_type,
-            DataType::Boolean | DataType::Utf8 | DataType::LargeUtf8 | DataType::Binary | DataType::LargeBinary
-        )
-    {
-        Ok(LogicalType::new(to_duckdb_type_id(data_type)?))
-    } else if let DataType::Dictionary(_, value_type) = data_type {
-        to_duckdb_logical_type(value_type)
-    } else if let DataType::Struct(fields) = data_type {
-        let mut shape = vec![];
-        for field in fields.iter() {
-            shape.push((field.name().as_str(), to_duckdb_logical_type(field.data_type())?));
+    match data_type {
+        DataType::Dictionary(_, value_type) => to_duckdb_logical_type(value_type),
+        DataType::Struct(fields) => {
+            let mut shape = vec![];
+            for field in fields.iter() {
+                shape.push((field.name().as_str(), to_duckdb_logical_type(field.data_type())?));
+            }
+            Ok(LogicalType::struct_type(shape.as_slice()))
         }
-        Ok(LogicalType::struct_type(shape.as_slice()))
-    } else if let DataType::List(child) = data_type {
-        Ok(LogicalType::list(&to_duckdb_logical_type(child.data_type())?))
-    } else if let DataType::LargeList(child) = data_type {
-        Ok(LogicalType::list(&to_duckdb_logical_type(child.data_type())?))
-    } else if let DataType::FixedSizeList(child, _) = data_type {
-        Ok(LogicalType::list(&to_duckdb_logical_type(child.data_type())?))
-    } else {
-        Err(
-            format!("Unsupported data type: {data_type}, please file an issue https://github.com/wangfenjin/duckdb-rs")
-                .into(),
+        DataType::List(child) | DataType::LargeList(child) => {
+            Ok(LogicalType::list(&to_duckdb_logical_type(child.data_type())?))
+        }
+        DataType::FixedSizeList(child, array_size) => Ok(LogicalType::array(
+            &to_duckdb_logical_type(child.data_type())?,
+            *array_size as u64,
+        )),
+        DataType::Decimal128(width, scale) if *scale > 0 => {
+            // DuckDB does not support negative decimal scales
+            Ok(LogicalType::decimal(*width, (*scale).try_into().unwrap()))
+        }
+        DataType::Boolean | DataType::Utf8 | DataType::LargeUtf8 | DataType::Binary | DataType::LargeBinary => {
+            Ok(LogicalType::new(to_duckdb_type_id(data_type)?))
+        }
+        dtype if dtype.is_primitive() => Ok(LogicalType::new(to_duckdb_type_id(data_type)?)),
+        _ => Err(format!(
+            "Unsupported data type: {data_type}, please file an issue https://github.com/wangfenjin/duckdb-rs"
         )
+        .into()),
     }
 }
 
@@ -237,7 +239,7 @@ pub fn record_batch_to_duckdb_data_chunk(
                 list_array_to_vector(as_large_list_array(col.as_ref()), &mut chunk.list_vector(i))?;
             }
             DataType::FixedSizeList(_, _) => {
-                fixed_size_list_array_to_vector(as_fixed_size_list_array(col.as_ref()), &mut chunk.list_vector(i))?;
+                fixed_size_list_array_to_vector(as_fixed_size_list_array(col.as_ref()), &mut chunk.array_vector(i))?;
             }
             DataType::Struct(_) => {
                 let struct_array = as_struct_array(col.as_ref());
@@ -351,13 +353,11 @@ fn primitive_array_to_vector(array: &dyn Array, out: &mut dyn Vector) -> Result<
                 out.as_mut_any().downcast_mut().unwrap(),
             );
         }
-        DataType::Decimal128(_, _) => {
+        DataType::Decimal128(width, _) => {
             decimal_array_to_vector(
-                array
-                    .as_any()
-                    .downcast_ref::<Decimal128Array>()
-                    .expect("Unable to downcast to BooleanArray"),
+                as_primitive_array(array),
                 out.as_mut_any().downcast_mut().unwrap(),
+                *width,
             );
         }
 
@@ -404,10 +404,43 @@ fn primitive_array_to_vector(array: &dyn Array, out: &mut dyn Vector) -> Result<
 }
 
 /// Convert Arrow [Decimal128Array] to a duckdb vector.
-fn decimal_array_to_vector(array: &Decimal128Array, out: &mut FlatVector) {
-    assert!(array.len() <= out.capacity());
-    for i in 0..array.len() {
-        out.as_mut_slice()[i] = array.value_as_string(i).parse::<f64>().unwrap();
+fn decimal_array_to_vector(array: &Decimal128Array, out: &mut FlatVector, width: u8) {
+    match width {
+        1..=4 => {
+            let out_data = out.as_mut_slice();
+            for (i, value) in array.values().iter().enumerate() {
+                out_data[i] = value.to_i16().unwrap();
+            }
+        }
+        5..=9 => {
+            let out_data = out.as_mut_slice();
+            for (i, value) in array.values().iter().enumerate() {
+                out_data[i] = value.to_i32().unwrap();
+            }
+        }
+        10..=18 => {
+            let out_data = out.as_mut_slice();
+            for (i, value) in array.values().iter().enumerate() {
+                out_data[i] = value.to_i64().unwrap();
+            }
+        }
+        19..=38 => {
+            let out_data = out.as_mut_slice();
+            for (i, value) in array.values().iter().enumerate() {
+                out_data[i] = value.to_i128().unwrap();
+            }
+        }
+        // This should never happen, arrow only supports 1-38 decimal digits
+        _ => panic!("Invalid decimal width: {}", width),
+    }
+
+    // Set nulls
+    if let Some(nulls) = array.nulls() {
+        for (i, null) in nulls.into_iter().enumerate() {
+            if !null {
+                out.set_null(i);
+            }
+        }
     }
 }
 
@@ -470,19 +503,13 @@ fn list_array_to_vector<O: OffsetSizeTrait + AsPrimitive<usize>>(
 
 fn fixed_size_list_array_to_vector(
     array: &FixedSizeListArray,
-    out: &mut ListVector,
+    out: &mut ArrayVector,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let value_array = array.values();
     let mut child = out.child(value_array.len());
     match value_array.data_type() {
         dt if dt.is_primitive() => {
             primitive_array_to_vector(value_array.as_ref(), &mut child)?;
-            for i in 0..array.len() {
-                let offset = array.value_offset(i);
-                let length = array.value_length();
-                out.set_entry(i, offset as usize, length as usize);
-            }
-            out.set_len(value_array.len());
         }
         DataType::Utf8 => {
             string_array_to_vector(as_string_array(value_array.as_ref()), &mut child);
@@ -491,15 +518,9 @@ fn fixed_size_list_array_to_vector(
             binary_array_to_vector(as_generic_binary_array(value_array.as_ref()), &mut child);
         }
         _ => {
-            return Err("Nested list is not supported yet.".into());
+            return Err("Nested array is not supported yet.".into());
         }
     }
-    for i in 0..array.len() {
-        let offset = array.value_offset(i);
-        let length = array.value_length();
-        out.set_entry(i, offset as usize, length as usize);
-    }
-    out.set_len(value_array.len());
 
     Ok(())
 }
@@ -532,7 +553,7 @@ fn struct_array_to_vector(array: &StructArray, out: &mut StructVector) -> Result
             DataType::FixedSizeList(_, _) => {
                 fixed_size_list_array_to_vector(
                     as_fixed_size_list_array(column.as_ref()),
-                    &mut out.list_vector_child(i),
+                    &mut out.array_vector_child(i),
                 )?;
             }
             DataType::Struct(_) => {
@@ -590,10 +611,10 @@ mod test {
     use crate::{Connection, Result};
     use arrow::{
         array::{
-            Array, ArrayRef, AsArray, BinaryArray, Date32Array, Date64Array, Decimal256Array, Float64Array,
-            GenericListArray, Int32Array, ListArray, OffsetSizeTrait, PrimitiveArray, StringArray, StructArray,
-            Time32SecondArray, Time64MicrosecondArray, TimestampMicrosecondArray, TimestampMillisecondArray,
-            TimestampNanosecondArray, TimestampSecondArray,
+            Array, ArrayRef, AsArray, BinaryArray, Date32Array, Date64Array, Decimal128Array, Decimal256Array,
+            FixedSizeListArray, GenericListArray, Int32Array, ListArray, OffsetSizeTrait, PrimitiveArray, StringArray,
+            StructArray, Time32SecondArray, Time64MicrosecondArray, TimestampMicrosecondArray,
+            TimestampMillisecondArray, TimestampNanosecondArray, TimestampSecondArray,
         },
         buffer::{OffsetBuffer, ScalarBuffer},
         datatypes::{i256, ArrowPrimitiveType, DataType, Field, Fields, Schema},
@@ -615,9 +636,9 @@ mod test {
         let mut arr = stmt.query_arrow(param)?;
         let rb = arr.next().expect("no record batch");
         assert_eq!(rb.num_columns(), 1);
-        let column = rb.column(0).as_any().downcast_ref::<Float64Array>().unwrap();
+        let column = rb.column(0).as_any().downcast_ref::<Decimal128Array>().unwrap();
         assert_eq!(column.len(), 1);
-        assert_eq!(column.value(0), 300.0);
+        assert_eq!(column.value(0), i128::from(30000));
         Ok(())
     }
 
@@ -781,6 +802,50 @@ mod test {
         Ok(())
     }
 
+    //field: FieldRef, size: i32, values: ArrayRef, nulls: Option<NullBuffer>
+    #[test]
+    fn test_fixed_array_roundtrip() -> Result<(), Box<dyn Error>> {
+        let array = FixedSizeListArray::new(
+            Arc::new(Field::new("item", DataType::Int32, true)),
+            2,
+            Arc::new(Int32Array::from(vec![Some(1), Some(2), Some(3), Some(4), Some(5)])),
+            None,
+        );
+
+        let expected_output_array = array.clone();
+
+        let db = Connection::open_in_memory()?;
+        db.register_table_function::<ArrowVTab>("arrow")?;
+
+        // Roundtrip a record batch from Rust to DuckDB and back to Rust
+        let schema = Schema::new(vec![Field::new("a", array.data_type().clone(), false)]);
+
+        let rb = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(array.clone())])?;
+        let param = arrow_recordbatch_to_query_params(rb);
+        let mut stmt = db.prepare("select a from arrow(?, ?)")?;
+        let rb = stmt.query_arrow(param)?.next().expect("no record batch");
+
+        let output_any_array = rb.column(0);
+        assert!(output_any_array
+            .data_type()
+            .equals_datatype(expected_output_array.data_type()));
+
+        match output_any_array.as_fixed_size_list_opt() {
+            Some(output_array) => {
+                assert_eq!(output_array.len(), expected_output_array.len());
+                for i in 0..output_array.len() {
+                    assert_eq!(output_array.is_valid(i), expected_output_array.is_valid(i));
+                    if output_array.is_valid(i) {
+                        assert!(expected_output_array.value(i).eq(&output_array.value(i)));
+                    }
+                }
+            }
+            None => panic!("Expected FixedSizeListArray"),
+        }
+
+        Ok(())
+    }
+
     #[test]
     fn test_primitive_roundtrip_contains_nulls() -> Result<(), Box<dyn Error>> {
         let mut builder = arrow::array::PrimitiveBuilder::<arrow::datatypes::Int32Type>::new();
@@ -858,6 +923,19 @@ mod test {
             Time64MicrosecondArray::from(vec![1_000_000, 2_000_000, 3_000_000]),
         )?;
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_decimal128_roundtrip() -> Result<(), Box<dyn Error>> {
+        let array: PrimitiveArray<arrow::datatypes::Decimal128Type> =
+            Decimal128Array::from(vec![i128::from(1), i128::from(2), i128::from(3)]);
+        check_rust_primitive_array_roundtrip(array.clone(), array)?;
+
+        // With width and scale
+        let array: PrimitiveArray<arrow::datatypes::Decimal128Type> =
+            Decimal128Array::from(vec![i128::from(12345)]).with_data_type(DataType::Decimal128(5, 2));
+        check_rust_primitive_array_roundtrip(array.clone(), array)?;
         Ok(())
     }
 
