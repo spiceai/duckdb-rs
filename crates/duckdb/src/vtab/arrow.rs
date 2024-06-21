@@ -262,7 +262,7 @@ pub fn record_batch_to_duckdb_data_chunk(
 fn primitive_array_to_flat_vector<T: ArrowPrimitiveType>(array: &PrimitiveArray<T>, out_vector: &mut FlatVector) {
     // assert!(array.len() <= out_vector.capacity());
     out_vector.copy::<T::Native>(array.values());
-    set_nulls(array, out_vector);
+    set_nulls_in_flat_vector(array, out_vector);
 }
 
 fn primitive_array_to_flat_vector_cast<T: ArrowPrimitiveType>(
@@ -273,7 +273,7 @@ fn primitive_array_to_flat_vector_cast<T: ArrowPrimitiveType>(
     let array = arrow::compute::kernels::cast::cast(array, &data_type).unwrap();
     let out_vector: &mut FlatVector = out_vector.as_mut_any().downcast_mut().unwrap();
     out_vector.copy::<T::Native>(array.as_primitive::<T>().values());
-    set_nulls(&array, out_vector);
+    set_nulls_in_flat_vector(&array, out_vector);
 }
 
 fn primitive_array_to_vector(array: &dyn Array, out: &mut dyn Vector) -> Result<(), Box<dyn std::error::Error>> {
@@ -423,14 +423,7 @@ fn decimal_array_to_vector(array: &Decimal128Array, out: &mut FlatVector, width:
     }
 
     // Set nulls
-    if let Some(nulls) = array.nulls() {
-        for (i, null) in nulls.into_iter().enumerate() {
-            if !null {
-                out.set_null(i);
-            }
-        }
-    }
-    set_nulls(array, out);
+    set_nulls_in_flat_vector(array, out);
 }
 
 /// Convert Arrow [BooleanArray] to a duckdb vector.
@@ -440,7 +433,7 @@ fn boolean_array_to_vector(array: &BooleanArray, out: &mut FlatVector) {
     for i in 0..array.len() {
         out.as_mut_slice()[i] = array.value(i);
     }
-    set_nulls(array, out);
+    set_nulls_in_flat_vector(array, out);
 }
 
 fn string_array_to_vector(array: &StringArray, out: &mut FlatVector) {
@@ -451,7 +444,7 @@ fn string_array_to_vector(array: &StringArray, out: &mut FlatVector) {
         let s = array.value(i);
         out.insert(i, s);
     }
-    set_nulls(array, out);
+    set_nulls_in_flat_vector(array, out);
 }
 
 fn binary_array_to_vector(array: &BinaryArray, out: &mut FlatVector) {
@@ -461,7 +454,7 @@ fn binary_array_to_vector(array: &BinaryArray, out: &mut FlatVector) {
         let s = array.value(i);
         out.insert(i, s);
     }
-    set_nulls(array, out);
+    set_nulls_in_flat_vector(array, out);
 }
 
 fn list_array_to_vector<O: OffsetSizeTrait + AsPrimitive<usize>>(
@@ -491,7 +484,7 @@ fn list_array_to_vector<O: OffsetSizeTrait + AsPrimitive<usize>>(
         out.set_entry(i, offset.as_(), length.as_());
     }
 
-    set_nulls(array, out);
+    set_nulls_in_list_vector(array, out);
 
     Ok(())
 }
@@ -517,7 +510,7 @@ fn fixed_size_list_array_to_vector(
         }
     }
 
-    set_nulls(array, out);
+    set_nulls_in_array_vector(array, out);
 
     Ok(())
 }
@@ -566,7 +559,7 @@ fn struct_array_to_vector(array: &StructArray, out: &mut StructVector) -> Result
             }
         }
     }
-    set_nulls(array, out);
+    set_nulls_in_struct_vector(array, out);
     Ok(())
 }
 
@@ -603,7 +596,34 @@ pub fn arrow_ffi_to_query_params(array: FFI_ArrowArray, schema: FFI_ArrowSchema)
     [arr as *mut _ as usize, sch as *mut _ as usize]
 }
 
-fn set_nulls(array: &dyn Array, out_vector: &mut FlatVector) {
+fn set_nulls_in_flat_vector(array: &dyn Array, out_vector: &mut FlatVector) {
+    if let Some(nulls) = array.nulls() {
+        for (i, null) in nulls.into_iter().enumerate() {
+            if !null {
+                out_vector.set_null(i);
+            }
+        }
+    }
+}
+fn set_nulls_in_struct_vector(array: &dyn Array, out_vector: &mut StructVector) {
+    if let Some(nulls) = array.nulls() {
+        for (i, null) in nulls.into_iter().enumerate() {
+            if !null {
+                out_vector.set_null(i);
+            }
+        }
+    }
+}
+fn set_nulls_in_list_vector(array: &dyn Array, out_vector: &mut ListVector) {
+    if let Some(nulls) = array.nulls() {
+        for (i, null) in nulls.into_iter().enumerate() {
+            if !null {
+                out_vector.set_null(i);
+            }
+        }
+    }
+}
+fn set_nulls_in_array_vector(array: &dyn Array, out_vector: &mut ArrayVector) {
     if let Some(nulls) = array.nulls() {
         for (i, null) in nulls.into_iter().enumerate() {
             if !null {
