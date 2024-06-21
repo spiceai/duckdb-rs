@@ -173,6 +173,15 @@ impl ListVector {
         self.entries.as_mut_slice::<duckdb_list_entry>()[idx].length = length as u64;
     }
 
+    /// Set row as null
+    pub fn set_null(&mut self, row: usize) {
+        unsafe {
+            duckdb_vector_ensure_validity_writable(self.entries.ptr);
+            let idx = duckdb_vector_get_validity(self.entries.ptr);
+            duckdb_validity_set_row_invalid(idx, row as u64);
+        }
+    }
+
     /// Reserve the capacity for its child node.
     fn reserve(&self, capacity: usize) {
         unsafe {
@@ -190,7 +199,6 @@ impl ListVector {
 
 /// A array vector. (fixed-size list)
 pub struct ArrayVector {
-    /// ArrayVector does not own the vector pointer.
     ptr: duckdb_vector,
 }
 
@@ -235,7 +243,6 @@ impl ArrayVector {
 
 /// A struct vector.
 pub struct StructVector {
-    /// ListVector does not own the vector pointer.
     ptr: duckdb_vector,
 }
 
