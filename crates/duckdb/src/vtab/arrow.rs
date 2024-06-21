@@ -484,8 +484,6 @@ fn list_array_to_vector<O: OffsetSizeTrait + AsPrimitive<usize>>(
         out.set_entry(i, offset.as_(), length.as_());
     }
 
-    set_nulls_in_list_vector(array, out);
-
     Ok(())
 }
 
@@ -606,15 +604,6 @@ fn set_nulls_in_flat_vector(array: &dyn Array, out_vector: &mut FlatVector) {
     }
 }
 fn set_nulls_in_struct_vector(array: &dyn Array, out_vector: &mut StructVector) {
-    if let Some(nulls) = array.nulls() {
-        for (i, null) in nulls.into_iter().enumerate() {
-            if !null {
-                out_vector.set_null(i);
-            }
-        }
-    }
-}
-fn set_nulls_in_list_vector(array: &dyn Array, out_vector: &mut ListVector) {
     if let Some(nulls) = array.nulls() {
         for (i, null) in nulls.into_iter().enumerate() {
             if !null {
