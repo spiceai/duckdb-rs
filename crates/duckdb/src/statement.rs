@@ -1,6 +1,6 @@
 use std::{convert, ffi::c_void, fmt, mem, os::raw::c_char, ptr, str};
 
-use arrow::{array::StructArray, datatypes::SchemaRef};
+use arrow::{array::StructArray, datatypes::{Schema, SchemaRef}};
 
 use super::{ffi, AndThenRows, Connection, Error, MappedRows, Params, RawStatement, Result, Row, Rows, ValueRef};
 #[cfg(feature = "polars")]
@@ -107,6 +107,13 @@ impl Statement<'_> {
     pub fn query_arrow<P: Params>(&mut self, params: P) -> Result<Arrow<'_>> {
         self.execute(params)?;
         Ok(Arrow::new(self))
+    }
+
+    #[inline]
+    pub fn stream_arrow<P: Params>(&mut self, params: P, schema: SchemaRef) -> Result<Arrow<'_>> {
+        params.__bind_in(self)?;
+        self.stmt.execute_streaming()?;
+        Ok(Arrow::new_with_schema(self, schema))
     }
 
     /// Execute the prepared statement, returning a handle to the resulting
@@ -335,6 +342,11 @@ impl Statement<'_> {
     #[inline]
     pub fn step(&self) -> Option<StructArray> {
         self.stmt.step()
+    }
+
+    #[inline]
+    pub fn stream_step(&self, schema: SchemaRef) -> Option<StructArray> {
+        self.stmt.streaming_step(schema)
     }
 
     #[cfg(feature = "polars")]

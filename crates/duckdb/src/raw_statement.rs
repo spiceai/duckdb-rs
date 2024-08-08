@@ -1,7 +1,13 @@
-use std::{ffi::CStr, ptr, rc::Rc, sync::Arc};
+use std::{
+    ffi::CStr,
+    ops::Deref,
+    ptr::{self, null_mut},
+    rc::Rc,
+    sync::Arc,
+};
 
 use arrow::{
-    array::StructArray,
+    array::{ArrowNativeTypeOp, StructArray},
     datatypes::{DataType, Schema, SchemaRef},
     ffi::{from_ffi, FFI_ArrowArray, FFI_ArrowSchema},
 };
@@ -9,7 +15,7 @@ use arrow::{
 use super::{ffi, Result};
 #[cfg(feature = "polars")]
 use crate::arrow2;
-use crate::error::result_from_duckdb_arrow;
+use crate::{error::result_from_duckdb_arrow, Error};
 
 // Private newtype for raw sqlite3_stmts that finalize themselves when dropped.
 // TODO: destroy statement and result
@@ -17,6 +23,7 @@ use crate::error::result_from_duckdb_arrow;
 pub struct RawStatement {
     ptr: ffi::duckdb_prepared_statement,
     result: Option<ffi::duckdb_arrow>,
+    non_arrow_result: Option<ffi::duckdb_result>,
     schema: Option<SchemaRef>,
     // Cached SQL (trimmed) that we use as the key when we're in the statement
     // cache. This is None for statements which didn't come from the statement
@@ -38,6 +45,7 @@ impl RawStatement {
             ptr: stmt,
             result: None,
             schema: None,
+            non_arrow_result: None,
             statement_cache_key: None,
         }
     }
@@ -108,6 +116,39 @@ impl RawStatement {
             let struct_array = StructArray::from(array_data);
             Some(struct_array)
         }
+    }
+
+    #[inline]
+    pub fn streaming_step(&self, schema: SchemaRef) -> Option<StructArray> {
+        if let Some(mut result) = self.non_arrow_result {
+            unsafe {
+                let mut out = ffi::duckdb_stream_fetch_chunk(result);
+
+                if out.is_null() {
+                    return None;
+                }
+
+                let mut arrays = FFI_ArrowArray::empty();
+                ffi::duckdb_result_arrow_array(
+                    result,
+                    out,
+                    &mut std::ptr::addr_of_mut!(arrays) as *mut _ as *mut ffi::duckdb_arrow_array,
+                );
+
+                ffi::duckdb_destroy_data_chunk(&mut out);
+
+                if arrays.is_empty() {
+                    return None;
+                }
+
+                let schema = FFI_ArrowSchema::try_from(schema.deref()).ok()?;
+                let array_data = from_ffi(arrays, &schema).expect("ok");
+                let struct_array = StructArray::from(array_data);
+                return Some(struct_array);
+            }
+        }
+
+        None
     }
 
     #[cfg(feature = "polars")]
@@ -242,6 +283,32 @@ impl RawStatement {
         }
     }
 
+    pub fn execute_streaming(&mut self) -> Result<()> {
+        self.reset_result();
+        unsafe {
+            let mut out: ffi::duckdb_result = std::mem::zeroed();
+
+            let rc = ffi::duckdb_execute_prepared_streaming(self.ptr, &mut out);
+            if rc != ffi::DuckDBSuccess {
+                return Err(Error::DuckDBFailure(ffi::Error::new(rc), None));
+            }
+            let mut c_schema = Rc::into_raw(Rc::new(FFI_ArrowSchema::empty()));
+            let rc =
+                ffi::duckdb_prepared_arrow_schema(self.ptr, &mut c_schema as *mut _ as *mut ffi::duckdb_arrow_schema);
+            if rc != ffi::DuckDBSuccess {
+                Rc::from_raw(c_schema);
+                return Err(Error::DuckDBFailure(ffi::Error::new(rc), None));
+            }
+
+            self.schema = Some(Arc::new(Schema::try_from(&*c_schema).unwrap()));
+            Rc::from_raw(c_schema);
+
+            self.non_arrow_result = Some(out);
+
+            Ok(())
+        }
+    }
+
     #[inline]
     pub fn reset_result(&mut self) {
         self.schema = None;
@@ -250,6 +317,12 @@ impl RawStatement {
                 ffi::duckdb_destroy_arrow(&mut self.result_unwrap());
             }
             self.result = None;
+        }
+        if let Some(mut result) = self.non_arrow_result {
+            unsafe {
+                ffi::duckdb_destroy_result(&mut result);
+            }
+            self.non_arrow_result = None;
         }
     }
 
