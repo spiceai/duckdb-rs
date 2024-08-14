@@ -1,10 +1,4 @@
-use std::{
-    ffi::CStr,
-    ops::Deref,
-    ptr::{self, null_mut},
-    rc::Rc,
-    sync::Arc,
-};
+use std::{ffi::CStr, ops::Deref, ptr, rc::Rc, sync::Arc};
 
 use arrow::{
     array::{ArrowNativeTypeOp, StructArray},
@@ -120,7 +114,7 @@ impl RawStatement {
 
     #[inline]
     pub fn streaming_step(&self, schema: SchemaRef) -> Option<StructArray> {
-        if let Some(mut result) = self.duckdb_result {
+        if let Some(result) = self.duckdb_result {
             unsafe {
                 let mut out = ffi::duckdb_stream_fetch_chunk(result);
 
