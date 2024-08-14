@@ -23,7 +23,7 @@ use crate::{error::result_from_duckdb_arrow, Error};
 pub struct RawStatement {
     ptr: ffi::duckdb_prepared_statement,
     result: Option<ffi::duckdb_arrow>,
-    non_arrow_result: Option<ffi::duckdb_result>,
+    duckdb_result: Option<ffi::duckdb_result>,
     schema: Option<SchemaRef>,
     // Cached SQL (trimmed) that we use as the key when we're in the statement
     // cache. This is None for statements which didn't come from the statement
@@ -45,7 +45,7 @@ impl RawStatement {
             ptr: stmt,
             result: None,
             schema: None,
-            non_arrow_result: None,
+            duckdb_result: None,
             statement_cache_key: None,
         }
     }
@@ -120,7 +120,7 @@ impl RawStatement {
 
     #[inline]
     pub fn streaming_step(&self, schema: SchemaRef) -> Option<StructArray> {
-        if let Some(mut result) = self.non_arrow_result {
+        if let Some(mut result) = self.duckdb_result {
             unsafe {
                 let mut out = ffi::duckdb_stream_fetch_chunk(result);
 
@@ -292,18 +292,8 @@ impl RawStatement {
             if rc != ffi::DuckDBSuccess {
                 return Err(Error::DuckDBFailure(ffi::Error::new(rc), None));
             }
-            let mut c_schema = Rc::into_raw(Rc::new(FFI_ArrowSchema::empty()));
-            let rc =
-                ffi::duckdb_prepared_arrow_schema(self.ptr, &mut c_schema as *mut _ as *mut ffi::duckdb_arrow_schema);
-            if rc != ffi::DuckDBSuccess {
-                Rc::from_raw(c_schema);
-                return Err(Error::DuckDBFailure(ffi::Error::new(rc), None));
-            }
 
-            self.schema = Some(Arc::new(Schema::try_from(&*c_schema).unwrap()));
-            Rc::from_raw(c_schema);
-
-            self.non_arrow_result = Some(out);
+            self.duckdb_result = Some(out);
 
             Ok(())
         }
@@ -318,11 +308,11 @@ impl RawStatement {
             }
             self.result = None;
         }
-        if let Some(mut result) = self.non_arrow_result {
+        if let Some(mut result) = self.duckdb_result {
             unsafe {
                 ffi::duckdb_destroy_result(&mut result);
             }
-            self.non_arrow_result = None;
+            self.duckdb_result = None;
         }
     }
 
