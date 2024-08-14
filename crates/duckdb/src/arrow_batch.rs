@@ -1,5 +1,3 @@
-use arrow::datatypes::Schema;
-
 use super::{
     arrow::{datatypes::SchemaRef, record_batch::RecordBatch},
     Statement,
