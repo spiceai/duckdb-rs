@@ -3,7 +3,7 @@ use super::{
     Statement,
 };
 
-/// An handle for the resulting RecordBatch of a query.
+/// A handle for the resulting RecordBatch of a query.
 #[must_use = "Arrow is lazy and will do nothing unless consumed"]
 pub struct Arrow<'stmt> {
     pub(crate) stmt: Option<&'stmt Statement<'stmt>>,
@@ -30,7 +30,7 @@ impl<'stmt> Iterator for Arrow<'stmt> {
     }
 }
 
-/// An handle for the resulting RecordBatch of a query in streaming
+/// A handle for the resulting RecordBatch of a query in streaming
 #[must_use = "Arrow stream is lazy and will not fetch data unless consumed"]
 pub struct ArrowStream<'stmt> {
     pub(crate) stmt: Option<&'stmt Statement<'stmt>>,
