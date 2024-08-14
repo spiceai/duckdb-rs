@@ -30,8 +30,8 @@ impl<'stmt> Iterator for Arrow<'stmt> {
     }
 }
 
-/// An handle for the resulting RecordBatch of a query.
-#[must_use = "Arrow stream "]
+/// An handle for the resulting RecordBatch of a query in streaming
+#[must_use = "Arrow stream is lazy and will not fetch data unless consumed"]
 pub struct ArrowStream<'stmt> {
     pub(crate) stmt: Option<&'stmt Statement<'stmt>>,
     pub(crate) schema: SchemaRef,
