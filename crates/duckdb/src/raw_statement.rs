@@ -1,7 +1,7 @@
 use std::{ffi::CStr, ops::Deref, ptr, rc::Rc, sync::Arc};
 
 use arrow::{
-    array::{ArrowNativeTypeOp, StructArray},
+    array::StructArray,
     datatypes::{DataType, Schema, SchemaRef},
     ffi::{from_ffi, FFI_ArrowArray, FFI_ArrowSchema},
 };
