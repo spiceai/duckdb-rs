@@ -704,14 +704,14 @@ mod test {
     use arrow::{
         array::{
             Array, ArrayRef, AsArray, BinaryArray, Date32Array, Date64Array, Decimal128Array, Decimal256Array,
-            FixedSizeListArray, GenericByteArray, GenericListArray, Int32Array, IntervalDayTimeArray,
-            IntervalMonthDayNanoArray, IntervalYearMonthArray, LargeStringArray, ListArray, OffsetSizeTrait,
-            PrimitiveArray, StringArray, StructArray, Time32SecondArray, Time64MicrosecondArray,
+            DurationSecondArray, FixedSizeListArray, GenericByteArray, GenericListArray, Int32Array,
+            IntervalDayTimeArray, IntervalMonthDayNanoArray, IntervalYearMonthArray, LargeStringArray, ListArray,
+            OffsetSizeTrait, PrimitiveArray, StringArray, StructArray, Time32SecondArray, Time64MicrosecondArray,
             TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray, TimestampSecondArray,
         },
         buffer::{OffsetBuffer, ScalarBuffer},
         datatypes::{
-            i256, ArrowPrimitiveType, ByteArrayType, DataType, Field, Fields, IntervalDayTimeType,
+            i256, ArrowPrimitiveType, ByteArrayType, DataType, DurationSecondType, Field, Fields, IntervalDayTimeType,
             IntervalMonthDayNanoType, IntervalYearMonthType, Schema,
         },
         record_batch::RecordBatch,
@@ -1122,6 +1122,19 @@ mod test {
             IntervalMonthDayNanoType::make_value(0, 1, 1_000_000),
             IntervalMonthDayNanoType::make_value(0, 2, 2_000_000),
             IntervalMonthDayNanoType::make_value(0, 3, 3_000_000),
+        ]);
+        check_rust_primitive_array_roundtrip(array, expected_array)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_interval_roundtrip() -> Result<(), Box<dyn Error>> {
+        let array: PrimitiveArray<DurationSecondType> = DurationSecondArray::from(vec![1, 2, 3]);
+        let expected_array: PrimitiveArray<IntervalMonthDayNanoType> = IntervalMonthDayNanoArray::from(vec![
+            IntervalMonthDayNanoType::make_value(0, 0, 1_000_000_000),
+            IntervalMonthDayNanoType::make_value(0, 0, 2_000_000_000),
+            IntervalMonthDayNanoType::make_value(0, 0, 3_000_000_000),
         ]);
         check_rust_primitive_array_roundtrip(array, expected_array)?;
 
