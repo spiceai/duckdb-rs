@@ -298,7 +298,7 @@ fn primitive_array_to_flat_vector_cast<T: ArrowPrimitiveType>(
     array: &dyn Array,
     out_vector: &mut dyn Vector,
 ) {
-    let array = cast(array, &data_type).unwrap();
+    let array = cast(array, &data_type).expect(&format!("array is casted into {data_type}"));
     let out_vector: &mut FlatVector = out_vector.as_mut_any().downcast_mut().unwrap();
     out_vector.copy::<T::Native>(array.as_primitive::<T>().values());
     set_nulls_in_flat_vector(&array, out_vector);
@@ -379,7 +379,7 @@ fn primitive_array_to_vector(array: &dyn Array, out: &mut dyn Vector) -> Result<
         DataType::Interval(_) | DataType::Duration(_) => {
             let array = IntervalMonthDayNanoArray::from(
                 cast(array, &DataType::Interval(IntervalUnit::MonthDayNano))
-                    .unwrap()
+                    .expect("array is casted into IntervalMonthDayNanoArray")
                     .as_primitive::<IntervalMonthDayNanoType>()
                     .values()
                     .iter()
