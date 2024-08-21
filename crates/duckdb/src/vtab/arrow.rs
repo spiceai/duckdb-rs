@@ -1129,7 +1129,7 @@ mod test {
     }
 
     #[test]
-    fn test_interval_roundtrip() -> Result<(), Box<dyn Error>> {
+    fn test_duration_roundtrip() -> Result<(), Box<dyn Error>> {
         let array: PrimitiveArray<DurationSecondType> = DurationSecondArray::from(vec![1, 2, 3]);
         let expected_array: PrimitiveArray<IntervalMonthDayNanoType> = IntervalMonthDayNanoArray::from(vec![
             IntervalMonthDayNanoType::make_value(0, 0, 1_000_000_000),
