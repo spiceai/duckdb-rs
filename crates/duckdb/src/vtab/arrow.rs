@@ -524,6 +524,7 @@ fn list_array_to_vector<O: OffsetSizeTrait + AsPrimitive<usize>>(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let value_array = array.values();
     let mut child = out.child(value_array.len());
+    println!("{:?}", value_array.data_type());
     match value_array.data_type() {
         dt if dt.is_primitive() => {
             primitive_array_to_vector(value_array.as_ref(), &mut child)?;
@@ -533,6 +534,9 @@ fn list_array_to_vector<O: OffsetSizeTrait + AsPrimitive<usize>>(
         }
         DataType::Binary => {
             binary_array_to_vector(as_generic_binary_array(value_array.as_ref()), &mut child);
+        }
+        DataType::List(_) => {
+            list_array_to_vector(as_list_array(value_array.as_ref()), &mut child)?;
         }
         _ => {
             return Err("Nested list is not supported yet.".into());
