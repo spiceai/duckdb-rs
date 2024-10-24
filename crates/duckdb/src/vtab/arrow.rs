@@ -537,7 +537,7 @@ fn list_array_to_vector<O: OffsetSizeTrait + AsPrimitive<usize>>(
             binary_array_to_vector(as_generic_binary_array(value_array.as_ref()), &mut child);
         }
         DataType::List(_) => {
-            list_array_to_vector(as_list_array(value_array.as_ref()), &mut child)?;
+            list_array_to_vector(as_list_array(value_array.as_ref()), out)?;
         }
         _ => {
             return Err("Nested list is not supported yet.".into());
