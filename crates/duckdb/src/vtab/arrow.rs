@@ -5,9 +5,10 @@ use crate::core::{ArrayVector, FlatVector, Inserter, ListVector, StructVector, V
 use arrow::{
     array::{
         as_boolean_array, as_generic_binary_array, as_large_list_array, as_list_array, as_primitive_array,
-        as_string_array, as_struct_array, Array, ArrayData, AsArray, BinaryArray, BooleanArray, Decimal128Array,
-        FixedSizeBinaryArray, FixedSizeListArray, GenericListArray, GenericStringArray, IntervalMonthDayNanoArray,
-        LargeBinaryArray, LargeStringArray, OffsetSizeTrait, PrimitiveArray, StructArray,
+        as_string_array, as_struct_array, Array, ArrayData, AsArray, BinaryArray, BinaryViewArray, BooleanArray,
+        Decimal128Array, FixedSizeBinaryArray, FixedSizeListArray, GenericListArray, GenericStringArray,
+        IntervalMonthDayNanoArray, LargeBinaryArray, LargeStringArray, OffsetSizeTrait, PrimitiveArray,
+        StringViewArray, StructArray,
     },
     compute::cast,
 };
@@ -244,6 +245,15 @@ pub fn record_batch_to_duckdb_data_chunk(
                     &mut chunk.flat_vector(i),
                 );
             }
+            DataType::Utf8View => {
+                string_view_array_to_vector(
+                    col.as_ref()
+                        .as_any()
+                        .downcast_ref::<StringViewArray>()
+                        .ok_or_else(|| Box::<dyn std::error::Error>::from("Unable to downcast to StringViewArray"))?,
+                    &mut chunk.flat_vector(i),
+                );
+            }
             DataType::Binary => {
                 binary_array_to_vector(as_generic_binary_array(col.as_ref()), &mut chunk.flat_vector(i));
             }
@@ -256,6 +266,15 @@ pub fn record_batch_to_duckdb_data_chunk(
                         .as_any()
                         .downcast_ref::<LargeBinaryArray>()
                         .ok_or_else(|| Box::<dyn std::error::Error>::from("Unable to downcast to LargeBinaryArray"))?,
+                    &mut chunk.flat_vector(i),
+                );
+            }
+            DataType::BinaryView => {
+                binary_view_array_to_vector(
+                    col.as_ref()
+                        .as_any()
+                        .downcast_ref::<BinaryViewArray>()
+                        .ok_or_else(|| Box::<dyn std::error::Error>::from("Unable to downcast to BinaryViewArray"))?,
                     &mut chunk.flat_vector(i),
                 );
             }
@@ -488,7 +507,27 @@ fn string_array_to_vector<O: OffsetSizeTrait>(array: &GenericStringArray<O>, out
     set_nulls_in_flat_vector(array, out);
 }
 
+fn string_view_array_to_vector(array: &StringViewArray, out: &mut FlatVector) {
+    assert!(array.len() <= out.capacity());
+
+    for i in 0..array.len() {
+        let s = array.value(i);
+        out.insert(i, s);
+    }
+    set_nulls_in_flat_vector(array, out);
+}
+
 fn binary_array_to_vector(array: &BinaryArray, out: &mut FlatVector) {
+    assert!(array.len() <= out.capacity());
+
+    for i in 0..array.len() {
+        let s = array.value(i);
+        out.insert(i, s);
+    }
+    set_nulls_in_flat_vector(array, out);
+}
+
+fn binary_view_array_to_vector(array: &BinaryViewArray, out: &mut FlatVector) {
     assert!(array.len() <= out.capacity());
 
     for i in 0..array.len() {
