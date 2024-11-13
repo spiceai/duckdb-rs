@@ -572,8 +572,28 @@ fn list_array_to_vector<O: OffsetSizeTrait + AsPrimitive<usize>>(
         DataType::Utf8 => {
             string_array_to_vector(as_string_array(value_array.as_ref()), &mut child);
         }
+        DataType::Utf8View => {
+            string_view_array_to_vector(
+                value_array
+                    .as_ref()
+                    .as_any()
+                    .downcast_ref::<StringViewArray>()
+                    .ok_or_else(|| Box::<dyn std::error::Error>::from("Unable to downcast to StringViewArray"))?,
+                &mut child,
+            );
+        }
         DataType::Binary => {
             binary_array_to_vector(as_generic_binary_array(value_array.as_ref()), &mut child);
+        }
+        DataType::BinaryView => {
+            binary_view_array_to_vector(
+                value_array
+                    .as_ref()
+                    .as_any()
+                    .downcast_ref::<BinaryViewArray>()
+                    .ok_or_else(|| Box::<dyn std::error::Error>::from("Unable to downcast to BinaryViewArray"))?,
+                &mut child,
+            );
         }
         _ => {
             return Err("Nested list is not supported yet.".into());
