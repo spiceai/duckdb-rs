@@ -525,7 +525,7 @@ fn list_array_to_vector<O: OffsetSizeTrait + AsPrimitive<usize>>(
     let value_array = array.values();
     let mut child = out.child(value_array.len());
     match value_array.data_type() {
-        dt if dt.is_primitive() => {
+        dt if dt.is_primitive() || matches!(dt, DataType::Boolean) => {
             primitive_array_to_vector(value_array.as_ref(), &mut child)?;
         }
         DataType::Utf8 => {
