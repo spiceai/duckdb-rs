@@ -157,8 +157,8 @@ pub fn to_duckdb_type_id(data_type: &DataType) -> Result<LogicalTypeId, Box<dyn 
         DataType::Time64(_) => Time,
         DataType::Duration(_) => Interval,
         DataType::Interval(_) => Interval,
-        DataType::Binary | DataType::LargeBinary | DataType::FixedSizeBinary(_) => Blob,
-        DataType::Utf8 | DataType::LargeUtf8 => Varchar,
+        DataType::Binary | DataType::LargeBinary | DataType::FixedSizeBinary(_) | DataType::BinaryView => Blob,
+        DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => Varchar,
         DataType::List(_) | DataType::LargeList(_) | DataType::FixedSizeList(_, _) => List,
         DataType::Struct(_) => Struct,
         DataType::Union(_, _) => Union,
@@ -201,8 +201,10 @@ pub fn to_duckdb_logical_type(data_type: &DataType) -> Result<LogicalTypeHandle,
         DataType::Boolean
         | DataType::Utf8
         | DataType::LargeUtf8
+        | DataType::Utf8View
         | DataType::Binary
         | DataType::LargeBinary
+        | DataType::BinaryView
         | DataType::FixedSizeBinary(_) => Ok(LogicalTypeHandle::from(to_duckdb_type_id(data_type)?)),
         dtype if dtype.is_primitive() => Ok(LogicalTypeHandle::from(to_duckdb_type_id(data_type)?)),
         _ => Err(format!(
