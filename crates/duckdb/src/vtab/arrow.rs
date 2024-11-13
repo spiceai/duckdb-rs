@@ -763,11 +763,12 @@ mod test {
     use crate::{Connection, Result};
     use arrow::{
         array::{
-            Array, ArrayRef, AsArray, BinaryArray, Date32Array, Date64Array, Decimal128Array, Decimal256Array,
-            DurationSecondArray, FixedSizeListArray, GenericByteArray, GenericListArray, Int32Array,
+            Array, ArrayRef, AsArray, BinaryArray, BinaryViewArray, Date32Array, Date64Array, Decimal128Array,
+            Decimal256Array, DurationSecondArray, FixedSizeListArray, GenericByteArray, GenericListArray, Int32Array,
             IntervalDayTimeArray, IntervalMonthDayNanoArray, IntervalYearMonthArray, LargeStringArray, ListArray,
-            OffsetSizeTrait, PrimitiveArray, StringArray, StructArray, Time32SecondArray, Time64MicrosecondArray,
-            TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray, TimestampSecondArray,
+            OffsetSizeTrait, PrimitiveArray, StringArray, StringViewArray, StructArray, Time32SecondArray,
+            Time64MicrosecondArray, TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
+            TimestampSecondArray,
         },
         buffer::{OffsetBuffer, ScalarBuffer},
         datatypes::{
@@ -1324,5 +1325,121 @@ mod test {
         let column = rb.column(0).as_any().downcast_ref::<BinaryArray>().unwrap();
         assert_eq!(column.len(), 1);
         assert_eq!(column.value(0), b"test");
+    }
+
+    #[test]
+    fn test_string_view_roundtrip() -> Result<(), Box<dyn Error>> {
+        let db = Connection::open_in_memory()?;
+        db.register_table_function::<ArrowVTab>("arrow")?;
+
+        let array = StringViewArray::from(vec![Some("foo"), Some("bar"), Some("baz")]);
+        let schema = Schema::new(vec![Field::new("a", array.data_type().clone(), false)]);
+        let rb = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(array.clone())])?;
+
+        let param = arrow_recordbatch_to_query_params(rb);
+        let mut stmt = db.prepare("select a from arrow(?, ?)")?;
+        let rb = stmt.query_arrow(param)?.next().expect("no record batch");
+
+        let output_array = rb
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("Expected StringArray");
+
+        assert_eq!(output_array.len(), 3);
+        assert_eq!(output_array.value(0), "foo");
+        assert_eq!(output_array.value(1), "bar");
+        assert_eq!(output_array.value(2), "baz");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_binary_view_roundtrip() -> Result<(), Box<dyn Error>> {
+        let db = Connection::open_in_memory()?;
+        db.register_table_function::<ArrowVTab>("arrow")?;
+
+        let array = BinaryViewArray::from(vec![
+            Some(b"hello".as_ref()),
+            Some(b"world".as_ref()),
+            Some(b"!".as_ref()),
+        ]);
+        let schema = Schema::new(vec![Field::new("a", array.data_type().clone(), false)]);
+        let rb = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(array.clone())])?;
+
+        let param = arrow_recordbatch_to_query_params(rb);
+        let mut stmt = db.prepare("select a from arrow(?, ?)")?;
+        let rb = stmt.query_arrow(param)?.next().expect("no record batch");
+
+        let output_array = rb
+            .column(0)
+            .as_any()
+            .downcast_ref::<BinaryArray>()
+            .expect("Expected BinaryArray");
+
+        assert_eq!(output_array.len(), 3);
+        assert_eq!(output_array.value(0), b"hello");
+        assert_eq!(output_array.value(1), b"world");
+        assert_eq!(output_array.value(2), b"!");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_string_view_nulls_roundtrip() -> Result<(), Box<dyn Error>> {
+        let db = Connection::open_in_memory()?;
+        db.register_table_function::<ArrowVTab>("arrow")?;
+
+        let array = StringViewArray::from(vec![Some("foo"), None, Some("baz")]);
+        let schema = Schema::new(vec![Field::new("a", array.data_type().clone(), true)]);
+        let rb = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(array.clone())])?;
+
+        let param = arrow_recordbatch_to_query_params(rb);
+        let mut stmt = db.prepare("select a from arrow(?, ?)")?;
+        let rb = stmt.query_arrow(param)?.next().expect("no record batch");
+
+        let output_array = rb
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("Expected StringArray");
+
+        assert_eq!(output_array.len(), 3);
+        assert_eq!(output_array.is_valid(0), true);
+        assert_eq!(output_array.is_valid(1), false);
+        assert_eq!(output_array.is_valid(2), true);
+        assert_eq!(output_array.value(0), "foo");
+        assert_eq!(output_array.value(2), "baz");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_binary_view_nulls_roundtrip() -> Result<(), Box<dyn Error>> {
+        let db = Connection::open_in_memory()?;
+        db.register_table_function::<ArrowVTab>("arrow")?;
+
+        let array = BinaryViewArray::from(vec![Some(b"hello".as_ref()), None, Some(b"!".as_ref())]);
+        let schema = Schema::new(vec![Field::new("a", array.data_type().clone(), true)]);
+        let rb = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(array.clone())])?;
+
+        let param = arrow_recordbatch_to_query_params(rb);
+        let mut stmt = db.prepare("select a from arrow(?, ?)")?;
+        let rb = stmt.query_arrow(param)?.next().expect("no record batch");
+
+        let output_array = rb
+            .column(0)
+            .as_any()
+            .downcast_ref::<BinaryArray>()
+            .expect("Expected BinaryArray");
+
+        assert_eq!(output_array.len(), 3);
+        assert_eq!(output_array.is_valid(0), true);
+        assert_eq!(output_array.is_valid(1), false);
+        assert_eq!(output_array.is_valid(2), true);
+        assert_eq!(output_array.value(0), b"hello");
+        assert_eq!(output_array.value(2), b"!");
+
+        Ok(())
     }
 }
