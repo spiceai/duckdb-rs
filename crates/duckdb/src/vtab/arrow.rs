@@ -607,7 +607,11 @@ fn list_array_to_vector<O: OffsetSizeTrait + AsPrimitive<usize>>(
             struct_array_to_vector(as_struct_array(value_array.as_ref()), &mut out.struct_child())?;
         }
         _ => {
-            return Err("Nested list is not supported yet.".into());
+            return Err(format!(
+                "List with elements of type '{}' is not currently supported.",
+                value_array.data_type()
+            )
+            .into());
         }
     }
 
