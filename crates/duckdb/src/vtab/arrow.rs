@@ -597,6 +597,9 @@ fn list_array_to_vector<O: OffsetSizeTrait + AsPrimitive<usize>>(
                 &mut out.child(value_array.len()),
             );
         }
+        DataType::List(_) => {
+            list_array_to_vector(as_list_array(value_array.as_ref()), &mut out.list_child())?;
+        }
         DataType::FixedSizeList(_, _) => {
             fixed_size_list_array_to_vector(as_fixed_size_list_array(value_array.as_ref()), &mut out.array_child())?;
         }
@@ -1485,6 +1488,33 @@ mod test {
     }
 
     #[test]
+    fn test_list_of_lists_roundtrip() -> Result<(), Box<dyn Error>> {
+        // field name must be 'l' to match `query_arrow` behavior, otherwise record batches will not match
+        let field = Field::new("l", DataType::Int32, true);
+        let mut list_builder = ListBuilder::new(ListBuilder::new(Int32Builder::new()).with_field(field.clone()));
+
+        // Append first list of items
+        {
+            let list_item_builder = list_builder.values();
+            list_item_builder.append_value(vec![Some(1), Some(2)].into_iter());
+
+            // Append NULL list item
+            list_item_builder.append_null();
+
+            list_item_builder.append_value(vec![Some(3), None, Some(5)].into_iter());
+
+            list_builder.append(true);
+        }
+
+        // Append NULL list
+        list_builder.append_null();
+
+        check_generic_array_roundtrip(list_builder.finish())?;
+
+        Ok(())
+    }
+
+    #[test]
     fn test_list_of_structs_roundtrip() -> Result<(), Box<dyn Error>> {
         let field_i = Arc::new(Field::new("i", DataType::Int32, true));
         let field_s = Arc::new(Field::new("s", DataType::Utf8, true));
@@ -1503,7 +1533,7 @@ mod test {
                 DataType::Struct(vec![field_i, field_s].into()),
                 true,
             )),
-            OffsetBuffer::new(ScalarBuffer::from(vec![0, 2, 4, 5])),
+            OffsetBuffer::new(ScalarBuffer::from(vec![0, 3, 4, 5])),
             Arc::new(struct_array),
             Some(vec![true, false, true].into()),
         ))?;
