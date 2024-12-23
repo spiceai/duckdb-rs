@@ -608,7 +608,7 @@ fn list_array_to_vector<O: OffsetSizeTrait + AsPrimitive<usize>>(
         }
         _ => {
             return Err(format!(
-                "List with elements of type '{}' is not currently supported.",
+                "List with elements of type '{}' are not currently supported.",
                 value_array.data_type()
             )
             .into());
