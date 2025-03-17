@@ -1,5 +1,9 @@
 use super::{BindInfo, DataChunkHandle, Free, FunctionInfo, InitInfo, LogicalTypeHandle, LogicalTypeId, VTab};
+use crate::ffi::{
+    duckdb_date, duckdb_hugeint, duckdb_interval, duckdb_string_t, duckdb_time, duckdb_timestamp, duckdb_vector,
+};
 use std::ptr::null_mut;
+use std::sync::Arc;
 
 use crate::{
     core::{ArrayVector, FlatVector, Inserter, ListVector, StructVector, Vector},
@@ -10,10 +14,11 @@ use arrow::{
     array::{
         as_boolean_array, as_generic_binary_array, as_large_list_array, as_list_array, as_primitive_array,
         as_string_array, as_struct_array, Array, ArrayData, AsArray, BinaryArray, BinaryViewArray, BooleanArray,
-        Decimal128Array, FixedSizeBinaryArray, FixedSizeListArray, GenericListArray, GenericStringArray,
-        IntervalMonthDayNanoArray, LargeBinaryArray, LargeStringArray, OffsetSizeTrait, PrimitiveArray,
-        StringViewArray, StructArray,
+        Date32Array, Decimal128Array, FixedSizeBinaryArray, FixedSizeListArray, GenericBinaryBuilder, GenericListArray,
+        GenericStringArray, IntervalMonthDayNanoArray, LargeBinaryArray, LargeStringArray, OffsetSizeTrait,
+        PrimitiveArray, StringArray, StringViewArray, StructArray, TimestampMicrosecondArray, TimestampNanosecondArray,
     },
+    buffer::{BooleanBuffer, NullBuffer},
     compute::cast,
 };
 

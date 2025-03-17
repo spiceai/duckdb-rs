@@ -5,6 +5,7 @@
 pub use self::{
     from_sql::{FromSql, FromSqlError, FromSqlResult},
     ordered_map::OrderedMap,
+    string::DuckString,
     to_sql::{ToSql, ToSqlOutput},
     value::Value,
     value_ref::{EnumType, ListType, TimeUnit, ValueRef},
@@ -18,6 +19,7 @@ mod chrono;
 mod from_sql;
 #[cfg(feature = "serde_json")]
 mod serde_json;
+mod string;
 mod to_sql;
 #[cfg(feature = "url")]
 mod url;
