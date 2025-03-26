@@ -2,7 +2,7 @@ use std::ffi::CString;
 
 use arrow::ffi_stream::FFI_ArrowArrayStream;
 
-use crate::{error::error_from_duckdb_code, ffi, Connection, Result};
+use crate::{error::error_from_duckdb_code, ffi, Connection, Error, Result};
 
 impl Connection {
     /// Registers a temporary view in DuckDB based on an Arrow stream.
@@ -16,7 +16,7 @@ impl Connection {
     /// * `arrow_scan`: The Arrow stream to register
     pub fn register_arrow_scan_view(&self, view_name: &str, arrow_scan: &FFI_ArrowArrayStream) -> Result<()> {
         let conn = self.db.borrow_mut().con;
-        let c_str = CString::new(view_name).unwrap();
+        let c_str = CString::new(view_name).map_err(Error::NulError)?;
         let transmuted_arrow_scan = arrow_scan as *const _ as ffi::duckdb_arrow_stream;
         let r = unsafe { ffi::duckdb_arrow_scan(conn, c_str.as_ptr(), transmuted_arrow_scan) };
         if r != ffi::DuckDBSuccess {
