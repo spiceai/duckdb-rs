@@ -106,6 +106,7 @@ mod appender_params;
 mod arrow_batch;
 #[cfg(feature = "vtab-arrow")]
 mod arrow_interop;
+mod arrow_scan;
 mod cache;
 #[cfg(any(feature = "vscalar", feature = "vtab"))]
 mod callback;
