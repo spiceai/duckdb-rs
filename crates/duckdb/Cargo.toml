@@ -1,5 +1,5 @@
 [package]
-name = "duckdb"
+name = "spiceai_duckdb_fork"
 version = "1.2.1"
 authors.workspace = true
 edition.workspace = true
@@ -10,7 +10,7 @@ readme.workspace = true
 keywords.workspace = true
 license.workspace = true
 categories.workspace = true
-description = "Ergonomic wrapper for DuckDB"
+description = "Ergonomic wrapper for DuckDB - forked from duckdb-rs to add support for duckdb_scan_arrow"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
