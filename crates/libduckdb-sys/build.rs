@@ -64,6 +64,8 @@ mod build_bundled {
         cpp_files: &mut HashSet<String>,
         include_dirs: &mut HashSet<String>,
     ) {
+        println!("{:?}", manifest.extensions.keys());
+
         cpp_files.extend(manifest.extensions.get(extension).unwrap().cpp_files.clone());
         include_dirs.extend(manifest.extensions.get(extension).unwrap().include_dirs.clone());
         cfg.define(
@@ -126,6 +128,7 @@ mod build_bundled {
         let mut cfg = cc::Build::new();
 
         add_extension(&mut cfg, &manifest, "core_functions", &mut cpp_files, &mut include_dirs);
+        add_extension(&mut cfg, &manifest, "icu", &mut cpp_files, &mut include_dirs);
 
         #[cfg(feature = "parquet")]
         add_extension(&mut cfg, &manifest, "parquet", &mut cpp_files, &mut include_dirs);
