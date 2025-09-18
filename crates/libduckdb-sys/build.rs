@@ -64,8 +64,6 @@ mod build_bundled {
         cpp_files: &mut HashSet<String>,
         include_dirs: &mut HashSet<String>,
     ) {
-        println!("{:?}", manifest.extensions.keys());
-
         cpp_files.extend(manifest.extensions.get(extension).unwrap().cpp_files.clone());
         include_dirs.extend(manifest.extensions.get(extension).unwrap().include_dirs.clone());
         cfg.define(
