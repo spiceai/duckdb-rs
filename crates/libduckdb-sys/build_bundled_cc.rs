@@ -36,6 +36,7 @@ fn add_extension(
 
 fn extension_enabled(extension: &str) -> bool {
     extension == "core_functions"
+        || extension == "icu"
         || (extension == "parquet" && cfg!(feature = "parquet"))
         || (extension == "json" && cfg!(feature = "json"))
 }
