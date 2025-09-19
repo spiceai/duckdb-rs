@@ -29,7 +29,7 @@ ARCHIVE_MTIME = 946684800  # 2000-01-01T00:00:00Z
 
 # List of extensions' sources to grab. Technically, these sources will be compiled
 # but not included in the final build unless they're explicitly enabled.
-EXTENSIONS = ["core_functions", "parquet", "json"]
+EXTENSIONS = ["core_functions", "parquet", "json", "icu"]
 
 # Clear the duckdb directory
 try:
