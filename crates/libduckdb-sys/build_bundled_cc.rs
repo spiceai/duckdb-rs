@@ -89,6 +89,7 @@ fn rewrite_generated_extension_loader(enabled_extensions: &[String], loader_path
 
 fn extension_enabled(extension: &str) -> bool {
     extension == "core_functions"
+        || extension == "icu"
         || (extension == "parquet" && cfg!(feature = "parquet"))
         || (extension == "json" && cfg!(feature = "json"))
 }
