@@ -38,6 +38,7 @@ fn extension_enabled(extension: &str) -> bool {
     // Review build_bundled_cmake::enabled_extensions when changing this gate;
     // the backend mechanisms and supported extension sets intentionally differ.
     extension == "core_functions"
+        || extension == "icu"
         || (extension == "parquet" && cfg!(feature = "parquet"))
         || (extension == "json" && cfg!(feature = "json"))
 }
