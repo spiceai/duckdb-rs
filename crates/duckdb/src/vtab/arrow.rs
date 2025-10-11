@@ -1,8 +1,16 @@
 use super::{BindInfo, DataChunkHandle, InitInfo, LogicalTypeHandle, TableFunctionInfo, VTab};
-use std::sync::{atomic::AtomicBool, Arc, Mutex};
+use std::{
+    ffi::{c_void, CStr},
+    io, ptr,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+};
 
 use crate::{
-    core::{ArrayVector, FlatVector, Inserter, ListVector, LogicalTypeId, StructVector, Vector},
+    core::{ArrayVector, FlatVector, ListVector, LogicalTypeId, StructVector, Vector},
+    ffi,
     types::DuckString,
 };
 
@@ -34,12 +42,48 @@ use num::{cast::AsPrimitive, ToPrimitive};
 #[repr(C)]
 pub struct ArrowBindData {
     rb: Mutex<RecordBatch>,
+    converted_schema: ffi::duckdb_arrow_converted_schema,
 }
 
 /// Keeps track of whether the Arrow record batch has been consumed.
 #[repr(C)]
 pub struct ArrowInitData {
     done: AtomicBool,
+    last_chunk: Mutex<Option<ffi::duckdb_data_chunk>>,
+}
+
+impl Drop for ArrowBindData {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.converted_schema.is_null() {
+                let mut schema = self.converted_schema;
+                ffi::duckdb_destroy_arrow_converted_schema(&mut schema);
+                self.converted_schema = ptr::null_mut();
+            }
+        }
+    }
+}
+
+impl ArrowInitData {
+    fn take_last_chunk(&self) -> Option<ffi::duckdb_data_chunk> {
+        let mut guard = self.last_chunk.lock().unwrap();
+        guard.take()
+    }
+
+    fn store_chunk(&self, chunk: ffi::duckdb_data_chunk) {
+        let mut guard = self.last_chunk.lock().unwrap();
+        *guard = Some(chunk);
+    }
+}
+
+impl Drop for ArrowInitData {
+    fn drop(&mut self) {
+        if let Some(mut chunk) = self.last_chunk.lock().unwrap().take() {
+            unsafe {
+                ffi::duckdb_destroy_data_chunk(&mut chunk);
+            }
+        }
+    }
 }
 
 /// The Arrow table function.
@@ -68,6 +112,25 @@ unsafe fn address_to_arrow_record_batch(array: usize, schema: usize) -> RecordBa
     RecordBatch::from(&struct_array)
 }
 
+pub(crate) fn duckdb_error_to_string(err: ffi::duckdb_error_data) -> String {
+    unsafe {
+        if err.is_null() {
+            return "unknown DuckDB error".to_string();
+        }
+        let message = {
+            let msg_ptr = ffi::duckdb_error_data_message(err);
+            if msg_ptr.is_null() {
+                "unknown DuckDB error".to_string()
+            } else {
+                CStr::from_ptr(msg_ptr).to_string_lossy().into_owned()
+            }
+        };
+        let mut err_mut = err;
+        ffi::duckdb_destroy_error_data(&mut err_mut);
+        message
+    }
+}
+
 impl VTab for ArrowVTab {
     type BindData = ArrowBindData;
     type InitData = ArrowInitData;
@@ -80,8 +143,23 @@ impl VTab for ArrowVTab {
         let array = bind.get_parameter(0).to_int64();
         let schema = bind.get_parameter(1).to_int64();
 
+        let connection_ptr = {
+            let ptr = bind.get_extra_info::<c_void>() as ffi::duckdb_connection;
+            if ptr.is_null() {
+                return Err("Missing DuckDB connection for Arrow table function".into());
+            }
+            ptr
+        };
+
         unsafe {
             let rb = address_to_arrow_record_batch(array as usize, schema as usize);
+            let mut ffi_schema = FFI_ArrowSchema::try_from(rb.schema().as_ref())?;
+            let schema_ptr = &mut ffi_schema as *mut FFI_ArrowSchema as *mut ffi::ArrowSchema;
+            let mut converted_schema: ffi::duckdb_arrow_converted_schema = ptr::null_mut();
+            let err = ffi::duckdb_schema_from_arrow(connection_ptr, schema_ptr, &mut converted_schema);
+            if !err.is_null() {
+                return Err(io::Error::new(io::ErrorKind::Other, duckdb_error_to_string(err)).into());
+            }
             for f in rb.schema().fields() {
                 let name = f.name();
                 let data_type = f.data_type();
@@ -89,13 +167,17 @@ impl VTab for ArrowVTab {
                 bind.add_result_column(name, logical_type);
             }
 
-            Ok(ArrowBindData { rb: Mutex::new(rb) })
+            Ok(ArrowBindData {
+                rb: Mutex::new(rb),
+                converted_schema,
+            })
         }
     }
 
     fn init(_: &InitInfo) -> Result<Self::InitData, Box<dyn std::error::Error>> {
         Ok(ArrowInitData {
             done: AtomicBool::new(false),
+            last_chunk: Mutex::new(None),
         })
     }
 
@@ -103,21 +185,60 @@ impl VTab for ArrowVTab {
         let init_info = func.get_init_data();
         let bind_info = func.get_bind_data();
 
-        if init_info.done.load(std::sync::atomic::Ordering::Relaxed) {
-            output.set_len(0);
-        } else {
-            let rb = bind_info.rb.lock().unwrap();
-            record_batch_to_duckdb_data_chunk(&rb, output)?;
-            init_info.done.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(mut previous_chunk) = init_info.take_last_chunk() {
+            unsafe {
+                ffi::duckdb_destroy_data_chunk(&mut previous_chunk);
+            }
         }
+
+        if init_info.done.load(Ordering::Relaxed) {
+            output.set_len(0);
+            return Ok(());
+        }
+
+        let connection_ptr = {
+            let ptr = func.get_extra_info::<c_void>() as ffi::duckdb_connection;
+            if ptr.is_null() {
+                return Err("Missing DuckDB connection for Arrow table function".into());
+            }
+            ptr
+        };
+
+        let record_batch = {
+            let guard = bind_info.rb.lock().unwrap();
+            guard.clone()
+        };
+        let struct_array = StructArray::from(record_batch.clone());
+        let array_data = ArrayData::from(struct_array);
+        let mut ffi_array = FFI_ArrowArray::new(&array_data);
+        let array_ptr = &mut ffi_array as *mut FFI_ArrowArray as *mut ffi::ArrowArray;
+        let mut out_chunk: ffi::duckdb_data_chunk = ptr::null_mut();
+        let err = unsafe {
+            ffi::duckdb_data_chunk_from_arrow(connection_ptr, array_ptr, bind_info.converted_schema, &mut out_chunk)
+        };
+        if !err.is_null() {
+            return Err(io::Error::new(io::ErrorKind::Other, duckdb_error_to_string(err)).into());
+        }
+
+        let output_ptr = output.get_ptr();
+        for column_index in 0..record_batch.num_columns() {
+            unsafe {
+                let source = ffi::duckdb_data_chunk_get_vector(out_chunk, column_index as u64);
+                let target = ffi::duckdb_data_chunk_get_vector(output_ptr, column_index as u64);
+                ffi::duckdb_vector_reference_vector(target, source);
+            }
+        }
+        output.set_len(record_batch.num_rows());
+        init_info.store_chunk(out_chunk);
+        init_info.done.store(true, Ordering::Relaxed);
 
         Ok(())
     }
 
     fn parameters() -> Option<Vec<LogicalTypeHandle>> {
         Some(vec![
-            LogicalTypeHandle::from(LogicalTypeId::UBigint), // file path
-            LogicalTypeHandle::from(LogicalTypeId::UBigint), // sheet name
+            LogicalTypeHandle::from(LogicalTypeId::UBigint), // ArrowArray pointer
+            LogicalTypeHandle::from(LogicalTypeId::UBigint), // ArrowSchema pointer
         ])
     }
 }
@@ -511,35 +632,6 @@ pub fn data_chunk_to_arrow(chunk: &DataChunkHandle) -> Result<RecordBatch, Box<d
     Ok(RecordBatch::try_from_iter(columns.into_iter())?)
 }
 
-struct DataChunkHandleSlice<'a> {
-    chunk: &'a mut DataChunkHandle,
-    column_index: usize,
-}
-
-impl<'a> DataChunkHandleSlice<'a> {
-    fn new(chunk: &'a mut DataChunkHandle, column_index: usize) -> Self {
-        Self { chunk, column_index }
-    }
-}
-
-impl WritableVector for DataChunkHandleSlice<'_> {
-    fn array_vector(&mut self) -> ArrayVector {
-        self.chunk.array_vector(self.column_index)
-    }
-
-    fn flat_vector(&mut self) -> FlatVector {
-        self.chunk.flat_vector(self.column_index)
-    }
-
-    fn struct_vector(&mut self) -> StructVector {
-        self.chunk.struct_vector(self.column_index)
-    }
-
-    fn list_vector(&mut self) -> ListVector {
-        self.chunk.list_vector(self.column_index)
-    }
-}
-
 /// A WriteableVector is a trait that allows writing data to a DuckDB vector.
 /// To get the specific vector type, use the appropriate method.
 pub trait WritableVector {
@@ -661,26 +753,6 @@ impl WritableVector for duckdb_vector {
     fn struct_vector(&mut self) -> StructVector {
         StructVector::from(*self)
     }
-}
-
-/// Converts a `RecordBatch` to a `DataChunk` in the DuckDB format.
-///
-/// # Arguments
-///
-/// * `batch` - A reference to the `RecordBatch` to be converted to a `DataChunk`.
-/// * `chunk` - A mutable reference to the `DataChunk` to store the converted data.
-pub fn record_batch_to_duckdb_data_chunk(
-    batch: &RecordBatch,
-    chunk: &mut DataChunkHandle,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Fill the row
-    assert_eq!(batch.num_columns(), chunk.num_columns());
-    for i in 0..batch.num_columns() {
-        let col = batch.column(i);
-        write_arrow_array_to_vector(col, &mut DataChunkHandleSlice::new(chunk, i))?;
-    }
-    chunk.set_len(batch.num_rows());
-    Ok(())
 }
 
 fn primitive_array_to_flat_vector<T: ArrowPrimitiveType>(array: &PrimitiveArray<T>, out_vector: &mut FlatVector) {

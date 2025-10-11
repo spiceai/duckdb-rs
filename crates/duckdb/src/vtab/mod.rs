@@ -15,7 +15,7 @@ pub mod arrow;
 #[cfg(feature = "vtab-arrow")]
 pub use self::arrow::{
     arrow_arraydata_to_query_params, arrow_ffi_to_query_params, arrow_recordbatch_to_query_params,
-    record_batch_to_duckdb_data_chunk, to_duckdb_logical_type, to_duckdb_type_id,
+    to_duckdb_logical_type, to_duckdb_type_id,
 };
 #[cfg(feature = "vtab-excel")]
 mod excel;
@@ -142,6 +142,13 @@ impl Connection {
             .set_bind(Some(bind::<T>))
             .set_init(Some(init::<T>))
             .set_function(Some(func::<T>));
+        let connection_ptr = {
+            let conn_ref = self.db.borrow();
+            conn_ref.con
+        };
+        unsafe {
+            table_function.set_extra_info(connection_ptr.cast::<c_void>(), None);
+        }
         for ty in T::parameters().unwrap_or_default() {
             table_function.add_parameter(&ty);
         }

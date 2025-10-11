@@ -1,12 +1,12 @@
 use super::{ffi, Appender, Result};
-use crate::{
-    core::{DataChunkHandle, LogicalTypeHandle},
-    error::result_from_duckdb_appender,
-    vtab::{record_batch_to_duckdb_data_chunk, to_duckdb_logical_type},
-    Error,
+use crate::{error::result_from_duckdb_appender, vtab::arrow::duckdb_error_to_string, Error};
+use arrow::{
+    array::{ArrayData, StructArray},
+    ffi::{FFI_ArrowArray, FFI_ArrowSchema},
+    record_batch::RecordBatch,
 };
-use arrow::record_batch::RecordBatch;
 use ffi::{duckdb_append_data_chunk, duckdb_vector_size};
+use std::ptr;
 
 impl Appender<'_> {
     /// Append one record batch
@@ -28,15 +28,24 @@ impl Appender<'_> {
     /// Will return `Err` if append column count not the same with the table schema
     #[inline]
     pub fn append_record_batch(&mut self, record_batch: RecordBatch) -> Result<()> {
-        let logical_types: Vec<LogicalTypeHandle> = record_batch
-            .schema()
-            .fields()
-            .iter()
-            .map(|field| {
-                to_duckdb_logical_type(field.data_type())
-                    .map_err(|_op| Error::ArrowTypeToDuckdbType(field.to_string(), field.data_type().clone()))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        if record_batch.num_rows() == 0 {
+            return Ok(());
+        }
+
+        let connection_ptr = {
+            let conn_ref = self.conn.db.borrow();
+            conn_ref.con
+        };
+
+        let mut ffi_schema = FFI_ArrowSchema::try_from(record_batch.schema().as_ref())
+            .map_err(|err| Error::DuckDBFailure(ffi::Error::new(ffi::DuckDBError), Some(err.to_string())))?;
+        let schema_ptr = &mut ffi_schema as *mut FFI_ArrowSchema as *mut ffi::ArrowSchema;
+        let mut converted_schema: ffi::duckdb_arrow_converted_schema = ptr::null_mut();
+        let schema_err = unsafe { ffi::duckdb_schema_from_arrow(connection_ptr, schema_ptr, &mut converted_schema) };
+        if !schema_err.is_null() {
+            let message = duckdb_error_to_string(schema_err);
+            return Err(Error::DuckDBFailure(ffi::Error::new(ffi::DuckDBError), Some(message)));
+        }
 
         let vector_size = unsafe { duckdb_vector_size() } as usize;
         let num_rows = record_batch.num_rows();
@@ -47,13 +56,40 @@ impl Appender<'_> {
             let slice_len = std::cmp::min(vector_size, num_rows - offset);
             let slice = record_batch.slice(offset, slice_len);
 
-            let mut data_chunk = DataChunkHandle::new(&logical_types);
-            record_batch_to_duckdb_data_chunk(&slice, &mut data_chunk).map_err(|_op| Error::AppendError)?;
+            let struct_array = StructArray::from(slice);
+            let array_data = ArrayData::from(struct_array);
+            let mut ffi_array = FFI_ArrowArray::new(&array_data);
+            let array_ptr = &mut ffi_array as *mut FFI_ArrowArray as *mut ffi::ArrowArray;
+            let mut out_chunk: ffi::duckdb_data_chunk = ptr::null_mut();
+            let chunk_err = unsafe {
+                ffi::duckdb_data_chunk_from_arrow(connection_ptr, array_ptr, converted_schema, &mut out_chunk)
+            };
+            if !chunk_err.is_null() {
+                let message = duckdb_error_to_string(chunk_err);
+                unsafe {
+                    if !converted_schema.is_null() {
+                        let mut schema_ptr = converted_schema;
+                        ffi::duckdb_destroy_arrow_converted_schema(&mut schema_ptr);
+                    }
+                }
+                return Err(Error::DuckDBFailure(ffi::Error::new(ffi::DuckDBError), Some(message)));
+            }
 
-            let rc = unsafe { duckdb_append_data_chunk(self.app, data_chunk.get_ptr()) };
-            result_from_duckdb_appender(rc, &mut self.app)?;
+            let rc = unsafe { duckdb_append_data_chunk(self.app, out_chunk) };
+            let append_result = result_from_duckdb_appender(rc, &mut self.app);
+            unsafe {
+                ffi::duckdb_destroy_data_chunk(&mut out_chunk);
+            }
+            append_result?;
 
             offset += slice_len;
+        }
+
+        unsafe {
+            if !converted_schema.is_null() {
+                let mut schema_ptr = converted_schema;
+                ffi::duckdb_destroy_arrow_converted_schema(&mut schema_ptr);
+            }
         }
 
         Ok(())
