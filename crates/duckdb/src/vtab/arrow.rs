@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-    core::{ArrayVector, FlatVector, ListVector, LogicalTypeId, StructVector, Vector},
+    core::{ArrayVector, FlatVector, Inserter, ListVector, LogicalTypeId, StructVector, Vector},
     ffi,
     types::DuckString,
 };
@@ -45,12 +45,18 @@ pub struct ArrowBindData {
     converted_schema: ffi::duckdb_arrow_converted_schema,
 }
 
+unsafe impl Send for ArrowBindData {}
+unsafe impl Sync for ArrowBindData {}
+
 /// Keeps track of whether the Arrow record batch has been consumed.
 #[repr(C)]
 pub struct ArrowInitData {
     done: AtomicBool,
     last_chunk: Mutex<Option<ffi::duckdb_data_chunk>>,
 }
+
+unsafe impl Send for ArrowInitData {}
+unsafe impl Sync for ArrowInitData {}
 
 impl Drop for ArrowBindData {
     fn drop(&mut self) {
