@@ -159,7 +159,8 @@ mod build_bundled {
             .flag_if_supported("/utf-8")
             .flag_if_supported("/bigobj")
             .warnings(false)
-            .flag_if_supported("-w");
+            .flag_if_supported("-w")
+            .flag_if_supported("-DDUCKDB_VERSION=\"1.4.1\"");
 
         // Define NDEBUG if not in debug mode
         let is_debug = match std::env::var("DEBUG") {
