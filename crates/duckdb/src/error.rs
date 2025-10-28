@@ -312,3 +312,25 @@ pub fn result_from_duckdb_extract(
         error_from_duckdb_code(ffi::DuckDBError, message)
     }
 }
+
+impl From<ffi::duckdb_error_data> for Error {
+    #[cold]
+    fn from(error_data: ffi::duckdb_error_data) -> Self {
+        if error_data.is_null() {
+            return Error::AppendError;
+        }
+
+        unsafe {
+            let msg_ptr = ffi::duckdb_error_data_message(error_data);
+            let error_msg = if !msg_ptr.is_null() {
+                CStr::from_ptr(msg_ptr).to_string_lossy().into_owned()
+            } else {
+                "Unknown error".to_string()
+            };
+
+            ffi::duckdb_destroy_error_data(&error_data as *const _ as *mut _);
+
+            Error::DuckDBFailure(ffi::Error::new(1), Some(error_msg))
+        }
+    }
+}
