@@ -5,8 +5,17 @@ use crate::{
     vtab::{record_batch_to_duckdb_data_chunk, to_duckdb_logical_type},
     Error,
 };
+use arrow::array::{ArrayData, StructArray};
+use arrow::error::ArrowError;
+use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
 use arrow::record_batch::RecordBatch;
 use ffi::{duckdb_append_data_chunk, duckdb_vector_size};
+use libduckdb_sys::{
+    duckdb_arrow_converted_schema, duckdb_data_chunk, duckdb_destroy_data_chunk, duckdb_error_data_message, ArrowSchema,
+};
+use std::ffi::CString;
+use std::ptr;
+use std::ptr::null_mut;
 
 impl Appender<'_> {
     /// Append one record batch
@@ -28,15 +37,25 @@ impl Appender<'_> {
     /// Will return `Err` if append column count not the same with the table schema
     #[inline]
     pub fn append_record_batch(&mut self, record_batch: RecordBatch) -> Result<()> {
-        let logical_types: Vec<LogicalTypeHandle> = record_batch
-            .schema()
-            .fields()
-            .iter()
-            .map(|field| {
-                to_duckdb_logical_type(field.data_type())
-                    .map_err(|_op| Error::ArrowTypeToDuckdbType(field.to_string(), field.data_type().clone()))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut duckdb_schema: duckdb_arrow_converted_schema = null_mut();
+        let mut arrow_schema =
+            FFI_ArrowSchema::try_from(record_batch.schema().as_ref()).map_err(|_| Error::AppendError)?;
+
+        let into_schema_error = unsafe {
+            ffi::duckdb_schema_from_arrow(
+                self.conn.db.borrow_mut().con,
+                &mut arrow_schema as *mut FFI_ArrowSchema as *mut ArrowSchema,
+                &mut duckdb_schema,
+            )
+        };
+
+        // todo respond with errno
+        if !into_schema_error.is_null() {
+            println!("{:?}", unsafe {
+                CString::from_raw(duckdb_error_data_message(into_schema_error) as *mut _)
+            });
+            return Err(Error::AppendError);
+        }
 
         let vector_size = unsafe { duckdb_vector_size() } as usize;
         let num_rows = record_batch.num_rows();
@@ -47,11 +66,29 @@ impl Appender<'_> {
             let slice_len = std::cmp::min(vector_size, num_rows - offset);
             let slice = record_batch.slice(offset, slice_len);
 
-            let mut data_chunk = DataChunkHandle::new(&logical_types);
-            record_batch_to_duckdb_data_chunk(&slice, &mut data_chunk).map_err(|_op| Error::AppendError)?;
+            let struct_array = StructArray::from(slice);
+            let array_data = ArrayData::from(struct_array);
+            let mut ffi_array = FFI_ArrowArray::new(&array_data);
 
-            let rc = unsafe { duckdb_append_data_chunk(self.app, data_chunk.get_ptr()) };
+            let mut duck_chunk: duckdb_data_chunk = ptr::null_mut();
+            let chunk_error = unsafe {
+                ffi::duckdb_data_chunk_from_arrow(
+                    self.conn.db.as_ptr() as *mut _,
+                    &mut ffi_array as *const _ as *mut _,
+                    duckdb_schema,
+                    &mut duck_chunk,
+                )
+            };
+
+            // todo respond with errno
+            if !chunk_error.is_null() {
+                return Err(Error::AppendError);
+            }
+
+            let rc = unsafe { duckdb_append_data_chunk(self.app, duck_chunk) };
             result_from_duckdb_appender(rc, &mut self.app)?;
+
+            unsafe { duckdb_destroy_data_chunk(&mut duck_chunk) };
 
             offset += slice_len;
         }
