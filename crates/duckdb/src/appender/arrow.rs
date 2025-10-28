@@ -1,19 +1,16 @@
 use super::{ffi, Appender, Result};
 use crate::{
-    core::{DataChunkHandle, LogicalTypeHandle},
-    error::result_from_duckdb_appender,
-    vtab::{record_batch_to_duckdb_data_chunk, to_duckdb_logical_type},
+    error::result_from_duckdb_appender
+    ,
     Error,
 };
 use arrow::array::{ArrayData, StructArray};
-use arrow::error::ArrowError;
 use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
 use arrow::record_batch::RecordBatch;
 use ffi::{duckdb_append_data_chunk, duckdb_vector_size};
 use libduckdb_sys::{
-    duckdb_arrow_converted_schema, duckdb_data_chunk, duckdb_destroy_data_chunk, duckdb_error_data_message, ArrowSchema,
+    duckdb_arrow_converted_schema, duckdb_data_chunk, duckdb_destroy_data_chunk, ArrowSchema,
 };
-use std::ffi::CString;
 use std::ptr;
 use std::ptr::null_mut;
 
@@ -49,12 +46,8 @@ impl Appender<'_> {
             )
         };
 
-        // todo respond with errno
         if !into_schema_error.is_null() {
-            println!("{:?}", unsafe {
-                CString::from_raw(duckdb_error_data_message(into_schema_error) as *mut _)
-            });
-            return Err(Error::AppendError);
+            return Err(into_schema_error.into());
         }
 
         let vector_size = unsafe { duckdb_vector_size() } as usize;
@@ -80,9 +73,8 @@ impl Appender<'_> {
                 )
             };
 
-            // todo respond with errno
             if !chunk_error.is_null() {
-                return Err(Error::AppendError);
+                return Err(chunk_error.into());
             }
 
             let rc = unsafe { duckdb_append_data_chunk(self.app, duck_chunk) };
