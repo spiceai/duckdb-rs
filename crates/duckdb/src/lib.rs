@@ -230,6 +230,7 @@ pub struct Connection {
 }
 
 unsafe impl Send for Connection {}
+unsafe impl Sync for Connection {}
 
 impl Connection {
     /// Open a new connection to a DuckDB database.
