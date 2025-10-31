@@ -232,6 +232,13 @@ pub struct Connection {
 unsafe impl Send for Connection {}
 unsafe impl Sync for Connection {}
 
+impl ToOwned for Connection {
+    type Owned = Self;
+    fn to_owned(&self) -> Self::Owned {
+        self.try_clone().expect("Cannot clone connection")
+    }
+}
+
 impl Connection {
     /// Open a new connection to a DuckDB database.
     ///
