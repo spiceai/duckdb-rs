@@ -158,6 +158,7 @@ mod build_bundled {
             .flag_if_supported("-std=c++11")
             .flag_if_supported("/utf-8")
             .flag_if_supported("/bigobj")
+            .flag_if_supported("-DDUCKDB_VERSION=\"v1.4.1\"")
             .warnings(false)
             .flag_if_supported("-w");
 
