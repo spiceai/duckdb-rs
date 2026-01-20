@@ -138,6 +138,11 @@ mod build_bundled {
         cfg.define("DUCKDB_EXTENSION_AUTOINSTALL_DEFAULT", "1");
         cfg.define("DUCKDB_EXTENSION_AUTOLOAD_DEFAULT", "1");
 
+        // Override the DuckDB version to ensure extension compatibility
+        // This makes the build download extensions from the official release path
+        // (extensions.duckdb.org/v1.4.3/...) instead of the dev git hash path
+        cfg.define("DUCKDB_VERSION", Some("v1.4.3"));
+
         // Since the manifest controls the set of files, we require it to be changed to know whether
         // to rebuild the project
         println!("cargo:rerun-if-changed={out_dir}/{lib_name}/manifest.json");
