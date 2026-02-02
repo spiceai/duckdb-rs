@@ -136,6 +136,11 @@ mod build_bundled {
         cfg.define("DUCKDB_EXTENSION_AUTOINSTALL_DEFAULT", "1");
         cfg.define("DUCKDB_EXTENSION_AUTOLOAD_DEFAULT", "1");
 
+        // Override the DuckDB version to ensure extension compatibility
+        // This makes the build download extensions from the official release path
+        // (extensions.duckdb.org/v1.4.3/...) instead of the dev git hash path
+        cfg.define("DUCKDB_VERSION", Some(r#""v1.4.4""#));
+
         // Rebuild if the source tarball changes
         println!("cargo:rerun-if-changed=duckdb.tar.gz");
 
