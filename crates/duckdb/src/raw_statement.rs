@@ -1,4 +1,4 @@
-use std::{ffi::CStr, ops::Deref, ptr, rc::Rc, sync::Arc};
+use std::{cell::OnceCell, collections::HashMap, ffi::CStr, ops::Deref, ptr, rc::Rc, sync::Arc};
 
 use arrow::{
     array::StructArray,
@@ -24,6 +24,11 @@ pub struct RawStatement {
     result: Option<ffi::duckdb_arrow>,
     duckdb_result: Option<ffi::duckdb_result>,
     schema: Option<SchemaRef>,
+    column_name_cache: OnceCell<HashMap<Box<str>, usize>>,
+    // Tracks whether the duckdb_result is truly streaming or materialized.
+    // This is needed because some statements (like CALL) return materialized
+    // results even when execute_streaming is called.
+    is_streaming: bool,
     // Cached SQL (trimmed) that we use as the key when we're in the statement
     // cache. This is None for statements which didn't come from the statement
     // cache.
@@ -44,7 +49,9 @@ impl RawStatement {
             ptr: stmt,
             result: None,
             schema: None,
+            column_name_cache: OnceCell::new(),
             duckdb_result: None,
+            is_streaming: false,
             statement_cache_key: None,
         }
     }
@@ -121,7 +128,13 @@ impl RawStatement {
     pub fn streaming_step(&self, schema: SchemaRef) -> Option<StructArray> {
         if let Some(result) = self.duckdb_result {
             unsafe {
-                let mut out = ffi::duckdb_stream_fetch_chunk(result);
+                // Use duckdb_stream_fetch_chunk for truly streaming results,
+                // or duckdb_fetch_chunk for materialized results (e.g., from CALL statements)
+                let mut out = if self.is_streaming {
+                    ffi::duckdb_stream_fetch_chunk(result)
+                } else {
+                    ffi::duckdb_fetch_chunk(result)
+                };
 
                 if out.is_null() {
                     return None;
@@ -236,6 +249,23 @@ impl RawStatement {
         Some(self.schema.as_ref().unwrap().field(idx).name())
     }
 
+    #[inline]
+    pub fn column_index(&self, name: &str) -> Option<usize> {
+        let cache = self.column_name_cache.get_or_init(|| self.build_column_name_cache());
+        cache.get(&*name.to_ascii_lowercase()).copied()
+    }
+
+    fn build_column_name_cache(&self) -> HashMap<Box<str>, usize> {
+        let schema = self.schema.as_ref().expect("The statement was not executed yet");
+        let mut cache = HashMap::with_capacity(schema.fields().len());
+        for (index, field) in schema.fields().iter().enumerate() {
+            cache
+                .entry(field.name().to_ascii_lowercase().into_boxed_str())
+                .or_insert(index);
+        }
+        cache
+    }
+
     #[allow(dead_code)]
     unsafe fn print_result(&self, mut result: ffi::duckdb_result) {
         use ffi::{duckdb_column_count, duckdb_column_name, duckdb_row_count};
@@ -293,9 +323,21 @@ impl RawStatement {
 
             let rc = ffi::duckdb_execute_prepared_streaming(self.ptr, &mut out);
             if rc != ffi::DuckDBSuccess {
-                return Err(Error::DuckDBFailure(ffi::Error::new(rc), None));
+                let msg = {
+                    let c_err = ffi::duckdb_result_error(&mut out);
+                    if c_err.is_null() {
+                        None
+                    } else {
+                        Some(CStr::from_ptr(c_err).to_string_lossy().to_string())
+                    }
+                };
+                ffi::duckdb_destroy_result(&mut out);
+                return Err(Error::DuckDBFailure(ffi::Error::new(rc), msg));
             }
 
+            // Check if the result is truly streaming or materialized
+            // Some statements (like CALL) return materialized results even when streaming is requested
+            self.is_streaming = ffi::duckdb_result_is_streaming(out);
             self.duckdb_result = Some(out);
 
             Ok(())
@@ -305,6 +347,8 @@ impl RawStatement {
     #[inline]
     pub fn reset_result(&mut self) {
         self.schema = None;
+        self.column_name_cache = OnceCell::new();
+        self.is_streaming = false;
         if self.result.is_some() {
             unsafe {
                 ffi::duckdb_destroy_arrow(&mut self.result_unwrap());
