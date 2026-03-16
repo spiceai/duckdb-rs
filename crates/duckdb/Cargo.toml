@@ -1,5 +1,5 @@
 [package]
-name = "duckdb"
+name = "spiceai_duckdb_fork"
 version = "1.4.4"
 authors = { workspace = true }
 repository = { workspace = true }
@@ -9,7 +9,7 @@ readme = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 categories = { workspace = true }
-description = "Ergonomic wrapper for DuckDB"
+description = "Ergonomic wrapper for DuckDB - forked from duckdb-rs to add support for duckdb_scan_arrow"
 edition = { workspace = true }
 rust-version = { workspace = true }
 
