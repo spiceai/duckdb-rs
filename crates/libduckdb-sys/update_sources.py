@@ -3,6 +3,7 @@
 import gzip
 import json
 import os
+import re
 import shutil
 import stat
 import sys
@@ -26,6 +27,33 @@ SRC_DIR = SCRIPT_DIR / "src"
 # range used by some Windows target directories. Unix epoch mtimes can fail
 # when archive tools restore them through SetFileTime.
 ARCHIVE_MTIME = 946684800  # 2000-01-01T00:00:00Z
+
+def _duckdb_release_version():
+    """DuckDB release version this fork targets, derived from the crate version.
+
+    The duckdb-sources submodule sits a few commits past the release tag (spiceai patches and
+    vendored out-of-tree extensions such as vss), so a bare `git describe` yields a dev version
+    (e.g. v1.5.4-dev5). DuckDB then treats the build as a dev build and resolves extensions by
+    commit hash, which makes downloadable extensions (tpch/tpcds/...) 404. Our engine is the
+    release version plus vendored extensions (ABI unchanged), so we report the release version.
+
+    Mirrors crate_version_to_duckdb_version in upgrade.sh and duckdb_version_from_pkg_version in
+    build.rs: the crate version 1.<MAJOR_MINOR_PATCH>.x encodes the DuckDB version (1.10503.x -> 1.5.3).
+    """
+    cargo_toml = (SCRIPT_DIR.parent.parent / "Cargo.toml").read_text()
+    section = re.search(r"\[workspace\.package\](.*?)(?:\n\[|\Z)", cargo_toml, re.S)
+    haystack = section.group(1) if section else cargo_toml
+    match = re.search(r'^\s*version\s*=\s*"\d+\.(\d+)\.\d+"', haystack, re.M)
+    if not match:
+        raise SystemExit("update_sources.py: could not determine crate version from Cargo.toml")
+    encoded = int(match.group(1))
+    return f"{encoded // 10000}.{(encoded // 100) % 100}.{encoded % 100}"
+
+
+# Pin the DuckDB version reported by the generated sources to the targeted release (e.g. 1.5.3).
+# Otherwise the dev-version `git describe` flips DuckDB into dev-build extension resolution (by
+# commit hash) and downloadable extensions such as tpch/tpcds 404. Respect an explicit override.
+os.environ.setdefault("SETUPTOOLS_SCM_PRETEND_VERSION", _duckdb_release_version())
 
 # List of extensions' sources to grab. Technically, these sources will be compiled
 # but not included in the final build unless they're explicitly enabled.
