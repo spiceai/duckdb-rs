@@ -86,8 +86,15 @@ When bumping DuckDB and/or duckdb-vss:
   `duckdb`/`extension-ci-tools` submodules — they are large and unused. Use a targeted
   `git -C .../extension/vss/upstream submodule deinit -f duckdb extension-ci-tools` if a
   `--recursive` init pulled them in.
-- The tarball's bytes change whenever the `duckdb-sources` commit changes, even with identical
-  vss sources, because package_build embeds a `git describe` dev-version string. This is benign.
+- **DuckDB version pinning (critical):** `update_sources.py` sets `SETUPTOOLS_SCM_PRETEND_VERSION`
+  to the release version derived from the crate version (1.10503.x -> 1.5.3), so the generated
+  sources report a clean `DUCKDB_VERSION` (e.g. `v1.5.3`). The duckdb-sources commit sits a few
+  commits past the release tag (spiceai patches + vendored out-of-tree extensions like vss), so a
+  bare `git describe` would yield a dev version (e.g. `v1.5.4-dev5`). A dev version flips DuckDB
+  into resolving extensions by commit hash, so downloadable extensions (tpch/tpcds/...) **404** —
+  breaking any test/feature that loads them. Keep this pin; override only via the same env var.
+  (The tarball bytes still change when the duckdb-sources commit changes because `DUCKDB_SOURCE_ID`
+  embeds the commit hash — that part is benign.)
 - Downstream (spiceai) must patch BOTH `[patch.crates-io]` and
   `[patch."https://github.com/spiceai/duckdb-rs.git"]` when overriding duckdb to a fork/path —
   datafusion-table-providers pulls duckdb via the git source, and a split yields two
