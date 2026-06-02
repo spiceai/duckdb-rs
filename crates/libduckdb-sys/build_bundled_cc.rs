@@ -90,6 +90,10 @@ fn rewrite_generated_extension_loader(enabled_extensions: &[String], loader_path
 fn extension_enabled(extension: &str) -> bool {
     extension == "core_functions"
         || extension == "icu"
+        // vss (vector similarity search / HNSW) is always statically linked so HNSW indexes
+        // work without a runtime `INSTALL vss`. Vendored from duckdb/duckdb-vss; see
+        // duckdb-sources/extension/vss.
+        || extension == "vss"
         || (extension == "parquet" && cfg!(feature = "parquet"))
         || (extension == "json" && cfg!(feature = "json"))
 }
@@ -151,6 +155,12 @@ pub fn main(out_dir: &str, out_path: &Path) {
 
     cfg.define("DUCKDB_EXTENSION_AUTOINSTALL_DEFAULT", "1");
     cfg.define("DUCKDB_EXTENSION_AUTOLOAD_DEFAULT", "1");
+
+    // Required by the vendored vss extension's usearch wrapper (duckdb_usearch.hpp does
+    // `#define USEARCH_USE_SIMSIMD DUCKDB_USEARCH_USE_SIMSIMD`). Matches duckdb-vss's CMake
+    // default (USE_SIMSIMD OFF): portable scalar distance, no SIMD codegen. fp16 is bundled
+    // (USEARCH_USE_FP16LIB=1) and OpenMP is disabled, both hardcoded in the wrapper.
+    cfg.define("DUCKDB_USEARCH_USE_SIMSIMD", "0");
 
     println!("cargo:rerun-if-changed=duckdb.tar.gz");
 

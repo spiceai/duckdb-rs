@@ -16,7 +16,9 @@ SRC_DIR = os.path.join(SCRIPT_DIR, "src")
 
 # List of extensions' sources to grab. Technically, these sources will be compiled
 # but not included in the final build unless they're explicitly enabled.
-EXTENSIONS = ["core_functions", "parquet", "json", "icu"]
+# "vss" is vendored out-of-tree (extension/vss/upstream -> duckdb/duckdb-vss); see
+# extension/vss/vss_config.py.
+EXTENSIONS = ["core_functions", "parquet", "json", "icu", "vss"]
 
 # Clear the duckdb directory
 try:
