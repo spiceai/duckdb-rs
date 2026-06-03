@@ -30,8 +30,9 @@ after re-running `update_sources.py` and committing the regenerated `duckdb.tar.
 
 ## VSS wiring (what makes vss statically linked)
 
-1. `duckdb-sources/extension/vss` (in the C++ fork) vendors the VSS source — see
-   `duckdb-sources/extension/vss/SKILL.md` for that side (submodule pin, `vss_config.py`).
+1. `duckdb-sources/extension/vss` (in the C++ fork) vendors the VSS source as committed files
+   under `extension/vss/src` (NOT a git submodule — see "Gotchas") — see
+   `duckdb-sources/extension/vss/SKILL.md` for that side (vendored `src`, `vss_config.py`).
 2. `update_sources.py`: `"vss"` is in `EXTENSIONS`, so package_build packages its sources and
    emits a loader guarded by `#if DUCKDB_EXTENSION_VSS_LINKED` (DuckDB 1.5's package_build is
    called with `default_linked_extensions=[]`, so the guard, not a hardcoded list, decides).
@@ -47,9 +48,9 @@ after re-running `update_sources.py` and committing the regenerated `duckdb.tar.
 ## Regenerate the tarball
 
 ```bash
-# Populate the submodule + the nested vss source (targeted; see gotcha below).
+# Populate the duckdb-sources submodule. vss is vendored files (extension/vss/src), NOT a
+# submodule, so no nested/recursive init is needed (and must not be re-introduced — see Gotchas).
 git submodule update --init crates/libduckdb-sys/duckdb-sources
-git -C crates/libduckdb-sys/duckdb-sources submodule update --init extension/vss/upstream
 
 python3 crates/libduckdb-sys/update_sources.py        # regenerates duckdb.tar.gz + manifest.json
 
@@ -64,8 +65,9 @@ nm target/debug/build/libduckdb-sys-*/out/libduckdb.a | grep -i 'VssExtension\|H
 When bumping DuckDB and/or duckdb-vss:
 
 1. **C++ fork first** (see `duckdb-sources/extension/vss/SKILL.md`): on a branch of the new
-   `spiceai-<version>`, bump `extension/vss/upstream` to the ABI-matched duckdb-vss ref (from
-   the new DuckDB's `.github/config/extensions/vss.cmake`), audit for drift, merge.
+   `spiceai-<version>`, re-vendor `extension/vss/src` from the ABI-matched duckdb-vss ref (from
+   the new DuckDB's `.github/config/extensions/vss.cmake`) — a plain copy, never a submodule —
+   audit for drift, merge.
 2. **Bump the submodule here** to the merged C++ commit:
    ```bash
    cd crates/libduckdb-sys/duckdb-sources && git fetch <spiceai-remote> && git checkout <merged-sha>
@@ -82,10 +84,11 @@ When bumping DuckDB and/or duckdb-vss:
 
 - **Always regenerate + commit `duckdb.tar.gz` after touching `duckdb-sources`.** A submodule
   bump alone is a no-op for the build; the tarball is what compiles.
-- When initializing `extension/vss/upstream`, do **not** recurse into duckdb-vss's own
-  `duckdb`/`extension-ci-tools` submodules — they are large and unused. Use a targeted
-  `git -C .../extension/vss/upstream submodule deinit -f duckdb extension-ci-tools` if a
-  `--recursive` init pulled them in.
+- **vss must stay vendored as files (`extension/vss/src`), never a git submodule.** duckdb-vss
+  has nested `duckdb`/`extension-ci-tools` submodules; Cargo recursively checks out submodules of
+  the duckdb-rs git dependency, so a vss submodule pulls in a full nested `duckdb` checkout whose
+  deep Swift paths exceed Windows' `MAX_PATH` and break the Windows build. (This is why #17
+  switched it from a submodule to a committed copy.)
 - **DuckDB version pinning (critical):** `update_sources.py` sets `SETUPTOOLS_SCM_PRETEND_VERSION`
   to the release version derived from the crate version (1.10503.x -> 1.5.3), so the generated
   sources report a clean `DUCKDB_VERSION` (e.g. `v1.5.3`). The duckdb-sources commit sits a few
