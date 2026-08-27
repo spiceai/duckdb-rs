@@ -1529,7 +1529,9 @@ mod test {
     #[test]
     fn test_version() -> Result<()> {
         let db = checked_memory_handle();
-        let expected: String = format!("v{}", env!("CARGO_PKG_VERSION"));
+        // Crate version is spoofed to 1.10505.0 so it drops into consumers pinned to
+        // DuckDB 1.5.5; the bundled engine is really v1.4.4.
+        let expected: String = "v1.4.4".to_string();
         let actual = db.version()?;
         assert_eq!(expected, actual);
         Ok(())
