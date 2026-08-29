@@ -1,7 +1,7 @@
-//! Validates the spiceai bundled build contract (see crates/libduckdb-sys/SKILL.md):
-//! the engine reports the clean DuckDB release version (a dev version would make
-//! downloadable extensions 404), and vss/icu are statically linked so HNSW indexes
-//! and ICU time zones work with no runtime INSTALL/LOAD.
+//! Validates the spiceai bundled build contract: the engine reports the clean
+//! DuckDB release version (a dev version would make downloadable extensions 404),
+//! and vss/icu are statically linked so HNSW indexes and ICU time zones work with
+//! no runtime INSTALL/LOAD.
 #![cfg(feature = "bundled")]
 
 use duckdb::{Connection, Result};
@@ -21,7 +21,6 @@ fn bundled_version_is_clean_release() -> Result<()> {
 }
 
 #[test]
-#[ignore = "vss is not statically linked yet on this branch"]
 fn vss_hnsw_index_without_install() -> Result<()> {
     let db = Connection::open_in_memory()?;
     db.execute_batch(
