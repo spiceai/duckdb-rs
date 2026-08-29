@@ -125,6 +125,13 @@ mod build_bundled {
 
         add_extension(&mut cfg, &manifest, "core_functions", &mut cpp_files, &mut include_dirs);
         add_extension(&mut cfg, &manifest, "icu", &mut cpp_files, &mut include_dirs);
+        // vss (vector similarity search / HNSW), vendored into the bundled sources so
+        // HNSW indexes need no runtime `INSTALL vss`. GENERATED_EXTENSION_HEADERS
+        // activates the loader that registers it at database open; usearch reads
+        // DUCKDB_USEARCH_USE_SIMSIMD externally and ships no simsimd sources.
+        add_extension(&mut cfg, &manifest, "vss", &mut cpp_files, &mut include_dirs);
+        cfg.define("GENERATED_EXTENSION_HEADERS", Some("1"));
+        cfg.define("DUCKDB_USEARCH_USE_SIMSIMD", Some("0"));
 
         #[cfg(feature = "parquet")]
         add_extension(&mut cfg, &manifest, "parquet", &mut cpp_files, &mut include_dirs);
