@@ -2,11 +2,9 @@
 //! DuckDB release version (a dev version would make downloadable extensions 404),
 //! and the statically linked extensions work with no runtime INSTALL/LOAD.
 //!
-//! This branch links icu but not vss — DuckDB 1.4's `package_build.py` has no
-//! static-extension loader generation, which arrived upstream in 1.5 and is what
-//! registers an out-of-tree extension at database open. The vss case is kept and
-//! ignored so the gap is visible here rather than remembered: un-ignoring it is
-//! the check that VSS static linking actually works, if it is ever added.
+//! DuckDB 1.4's `package_build.py` has no static-extension loader generation —
+//! that arrived upstream in 1.5 — so the fork supplies one by hand; the vss case
+//! is what proves it registers the extension at database open.
 #![cfg(feature = "bundled")]
 
 use duckdb::{Connection, Result};
@@ -26,7 +24,6 @@ fn bundled_version_is_clean_release() -> Result<()> {
 }
 
 #[test]
-#[ignore = "vss is not statically linked on this branch; HNSW needs a runtime INSTALL vss"]
 fn vss_hnsw_index_without_install() -> Result<()> {
     let db = Connection::open_in_memory()?;
     db.execute_batch(
