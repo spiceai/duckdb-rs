@@ -134,6 +134,20 @@ Or manually add it to your `Cargo.toml`:
 duckdb = { version = "=1.10505.0", features = ["bundled"] }
 ```
 
+> **This branch bundles DuckDB v1.4.4, not v1.5.5.**
+>
+> The crate version (`1.10505.0`) normally encodes the bundled DuckDB version,
+> and `1.10505` would mean DuckDB v1.5.5. Here it does not: the vendored engine
+> is **v1.4.4**, and only the crate version is carried over, so this branch
+> drops into a dependency graph that requires `1.10505` without any consumer
+> having to change a version requirement — a consumer moves its patch revision
+> and nothing else. `crates/duckdb`'s `test_version` asserts the linked engine
+> really reports `v1.4.4`.
+>
+> Use it to run a workload against the 1.4.4 engine on a stack pinned to
+> 1.5.5. For anything else, prefer the branch whose crate version matches its
+> engine.
+
 ### Using the development version from git
 
 To use the latest development version from the main branch, you can specify a git dependency in your `Cargo.toml`:
