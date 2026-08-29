@@ -6,16 +6,10 @@
 
 use duckdb::{Connection, Result};
 
-/// The DuckDB release version encoded in the crate version, e.g. 1.10505.0 -> v1.5.5.
-/// Mirrors crate_version_to_duckdb_version in libduckdb-sys/upgrade.sh.
+/// On this branch the crate version is the DuckDB version, so the engine must
+/// report it verbatim. (The 1.5.x branches encode it as 1.<MMmmpp>.x instead.)
 fn expected_duckdb_version() -> String {
-    let encoded: u32 = env!("CARGO_PKG_VERSION")
-        .split('.')
-        .nth(1)
-        .expect("crate version has an encoded segment")
-        .parse()
-        .expect("encoded segment is numeric");
-    format!("v{}.{}.{}", encoded / 10000, (encoded / 100) % 100, encoded % 100)
+    format!("v{}", env!("CARGO_PKG_VERSION"))
 }
 
 #[test]
