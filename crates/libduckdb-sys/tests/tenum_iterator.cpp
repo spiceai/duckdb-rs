@@ -6,15 +6,14 @@
 
 using duckdb_apache::thrift::TEnumIterator;
 
-// Take const references so both comparison operators must be const-qualified.
-static void check_end(const TEnumIterator &iterator, const TEnumIterator &end, bool exhausted) {
+static void check_end(TEnumIterator &iterator, const TEnumIterator &end, bool exhausted) {
   assert((iterator == end) == exhausted);
   assert((iterator != end) == !exhausted);
 }
 
 int main() {
   const TEnumIterator end(-1, nullptr, nullptr);
-  const TEnumIterator empty(0, nullptr, nullptr);
+  TEnumIterator empty(0, nullptr, nullptr);
   check_end(empty, end, true);
   assert((std::map<int, const char *>(empty, end).empty()));
 
