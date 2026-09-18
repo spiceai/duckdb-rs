@@ -67,6 +67,19 @@ manifest = {
 with open(os.path.join(TARGET_DIR, "manifest.json"), "w") as f:
     json.dump(manifest, f, indent=2)
 
+# libc++ in the macOS 27 SDK uses operator== when constructing Parquet's enum
+# maps. Preserve this Thrift compatibility fix when regenerating the archive.
+# https://github.com/spiceai/duckdb-rs/issues/46
+subprocess.check_call(
+    [
+        "patch",
+        "-f",
+        "-p1",
+        "-i",
+        os.path.join(SCRIPT_DIR, "patches", "thrift-enum-iterator.patch"),
+    ],
+    cwd=TARGET_DIR,
+)
 
 subprocess.check_call(
     "tar -czf duckdb.tar.gz duckdb",
