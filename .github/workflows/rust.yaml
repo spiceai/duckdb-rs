@@ -53,6 +53,10 @@ jobs:
       - run: cargo fmt --all -- --check
         if: matrix.os == 'ubuntu-latest'
 
+      - name: Test bundled Thrift iterator compatibility
+        if: matrix.os == 'ubuntu-latest'
+        run: python3 crates/libduckdb-sys/tests/test_bundled_thrift.py
+
       - name: run cargo clippy
         if: matrix.os == 'ubuntu-latest'
         run: cargo clippy --all-targets --all-features --locked -- -D warnings
