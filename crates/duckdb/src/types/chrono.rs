@@ -213,7 +213,9 @@ mod test {
         types::{FromSql, FromSqlError, ToSql, ToSqlOutput, ValueRef},
         Connection, Result,
     };
-    use chrono::{DateTime, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, TimeZone, Utc};
+    use chrono::{
+        DateTime, Duration, FixedOffset, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, TimeZone, Utc,
+    };
 
     fn checked_memory_handle() -> Result<Connection> {
         let db = Connection::open_in_memory()?;
@@ -341,6 +343,30 @@ mod test {
 
         let v: DateTime<Local> = db.query_row("SELECT b FROM foo", [], |r| r.get(0))?;
         assert_eq!(local, v);
+        Ok(())
+    }
+
+    // Unlike `test_date_time_local`, this fails without UTC normalization even when the
+    // test process itself runs in UTC.
+    #[test]
+    fn test_date_time_fixed_offset() -> Result<()> {
+        let db = checked_memory_handle()?;
+        let date = NaiveDate::from_ymd_opt(2016, 2, 24).unwrap();
+        let time = NaiveTime::from_hms_milli_opt(8, 56, 4, 789).unwrap();
+        let dt = NaiveDateTime::new(date, time);
+        let tokyo = FixedOffset::east_opt(9 * 3600)
+            .unwrap()
+            .from_local_datetime(&dt)
+            .single()
+            .unwrap();
+
+        db.execute("INSERT INTO foo (b) VALUES (?)", [tokyo])?;
+
+        let s: String = db.query_row("SELECT b FROM foo", [], |r| r.get(0))?;
+        assert_eq!("2016-02-23 23:56:04.789", s);
+
+        let v: DateTime<Utc> = db.query_row("SELECT b FROM foo", [], |r| r.get(0))?;
+        assert_eq!(tokyo, v);
         Ok(())
     }
 
